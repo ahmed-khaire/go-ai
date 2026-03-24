@@ -3,6 +3,7 @@ package xai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -137,8 +138,39 @@ func (m *LanguageModel) convertResponse(response xaiResponse) *types.GenerateRes
 		}
 	}
 	choice := response.Choices[0]
+
+	// Resolve primary text and any structured content parts.
+	text := choice.Message.Content.Text
+	var contentParts []types.ContentPart
+	if len(choice.Message.Content.Parts) > 0 {
+		for _, part := range choice.Message.Content.Parts {
+			switch part.Type {
+			case "text":
+				text += part.Text
+			default:
+				// Unknown content type: wrap as CustomContent so callers can
+				// inspect the raw provider data without the SDK silently dropping it.
+				contentParts = append(contentParts, types.CustomContent{
+					Kind:             "xai-" + part.Type,
+					ProviderMetadata: part.Raw,
+				})
+			}
+		}
+	}
+
+	// Map citations to SourceContent parts (type: "source", sourceType: "url").
+	// Citations are returned by XAI when the Live Search / web-search tool is used.
+	for i, url := range response.Citations {
+		contentParts = append(contentParts, types.SourceContent{
+			SourceType: "url",
+			ID:         fmt.Sprintf("xai-citation-%d", i),
+			URL:        url,
+		})
+	}
+
 	result := &types.GenerateResult{
-		Text:         choice.Message.Content,
+		Text:         text,
+		Content:      contentParts,
 		FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason),
 		Usage:        convertXaiUsage(response.Usage),
 		RawResponse:  response,
@@ -299,22 +331,71 @@ type xaiResponse struct {
 	Created int64  `json:"created"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Message      struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"message"`
+		Index        int        `json:"index"`
+		FinishReason string     `json:"finish_reason"`
+		Message      xaiMessage `json:"message"`
 	} `json:"choices"`
-	Usage xaiUsage `json:"usage"`
+	// Citations contains URL citations returned by the XAI Live Search / web
+	// search tool.  They are mapped to SourceContent parts in the result.
+	Citations []string `json:"citations,omitempty"`
+	Usage     xaiUsage `json:"usage"`
+}
+
+// xaiMessage represents the message returned in an XAI chat completion choice.
+// Content may be a plain string or an array of typed content blocks.
+type xaiMessage struct {
+	Role      string             `json:"role"`
+	Content   xaiMessageContent  `json:"content"`
+	ToolCalls []xaiToolCall      `json:"tool_calls"`
+}
+
+// xaiToolCall represents a tool call in an XAI response.
+type xaiToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// xaiContentPart represents a single typed content block in an array-form message.
+type xaiContentPart struct {
+	Type string          `json:"type"`
+	Text string          `json:"text,omitempty"`
+	Raw  json.RawMessage `json:"-"` // full raw JSON of the part for unknown types
+}
+
+// xaiMessageContent holds message content that may be a plain string or an
+// array of typed content blocks.  It implements json.Unmarshaler.
+type xaiMessageContent struct {
+	Text  string           // set when content is a JSON string
+	Parts []xaiContentPart // set when content is a JSON array
+}
+
+// UnmarshalJSON implements json.Unmarshaler for xaiMessageContent.
+func (c *xaiMessageContent) UnmarshalJSON(data []byte) error {
+	// Try string first — the common case.
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		c.Text = s
+		return nil
+	}
+	// Try array of content parts.
+	var rawParts []json.RawMessage
+	if err := json.Unmarshal(data, &rawParts); err != nil {
+		return err
+	}
+	c.Parts = make([]xaiContentPart, 0, len(rawParts))
+	for _, raw := range rawParts {
+		var part xaiContentPart
+		if err := json.Unmarshal(raw, &part); err != nil {
+			continue
+		}
+		part.Raw = raw
+		c.Parts = append(c.Parts, part)
+	}
+	return nil
 }
 
 type xaiUsage struct {

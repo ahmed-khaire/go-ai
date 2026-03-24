@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -278,6 +279,408 @@ func TestProviderOptionsOnAllBlocks(t *testing.T) {
 	}
 	if fileBlock.ProviderOptions["custom"] != "data" {
 		t.Error("FileContentBlock provider options not preserved")
+	}
+}
+
+// TestCustomContentType verifies CustomContent implements ContentPart and
+// round-trips cleanly through encoding/json.
+func TestCustomContentType(t *testing.T) {
+	// ContentType()
+	c := CustomContent{
+		Kind:             "xai-citation",
+		ProviderMetadata: json.RawMessage(`{"url":"https://example.com","title":"Example"}`),
+	}
+	if c.ContentType() != "custom" {
+		t.Errorf("ContentType() = %q, want \"custom\"", c.ContentType())
+	}
+
+	// Verify it implements ContentPart
+	var _ ContentPart = c
+
+	// Marshal
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("json.Marshal CustomContent failed: %v", err)
+	}
+
+	// Unmarshal round-trip
+	var got CustomContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal CustomContent failed: %v", err)
+	}
+	if got.Kind != c.Kind {
+		t.Errorf("Kind = %q, want %q", got.Kind, c.Kind)
+	}
+	// ProviderMetadata must be preserved byte-for-byte (json.RawMessage round-trip)
+	if string(got.ProviderMetadata) != string(c.ProviderMetadata) {
+		t.Errorf("ProviderMetadata = %s, want %s", got.ProviderMetadata, c.ProviderMetadata)
+	}
+}
+
+// TestCustomContentNoMetadata verifies CustomContent marshals correctly when
+// ProviderMetadata is absent (omitempty).
+func TestCustomContentNoMetadata(t *testing.T) {
+	c := CustomContent{Kind: "xai-unknown"}
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var got CustomContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if got.Kind != "xai-unknown" {
+		t.Errorf("Kind = %q, want \"xai-unknown\"", got.Kind)
+	}
+	if got.ProviderMetadata != nil {
+		t.Errorf("ProviderMetadata should be nil, got %s", got.ProviderMetadata)
+	}
+}
+
+// TestReasoningFileContentBase64 verifies that ReasoningFileContent.Data
+// ([]byte) is automatically base64-encoded by encoding/json on marshal and
+// decoded back to the original bytes on unmarshal — no explicit base64 handling
+// needed in application code.
+func TestReasoningFileContentBase64(t *testing.T) {
+	original := []byte("PNG\x89\x50\x4E\x47\x0D\x0A\x1A\x0A")
+	r := ReasoningFileContent{
+		MediaType: "image/png",
+		Data:      original,
+	}
+
+	if r.ContentType() != "reasoning-file" {
+		t.Errorf("ContentType() = %q, want \"reasoning-file\"", r.ContentType())
+	}
+
+	// Verify it implements ContentPart
+	var _ ContentPart = r
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("json.Marshal ReasoningFileContent failed: %v", err)
+	}
+
+	// data field must be a JSON string (base64), not a JSON array.
+	// Verify by checking the outer JSON contains a "data" key with a string value.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to parse marshaled JSON: %v", err)
+	}
+	dataField, ok := raw["data"]
+	if !ok {
+		t.Fatal("marshaled JSON missing 'data' field")
+	}
+	// A base64 string starts with '"'
+	if len(dataField) == 0 || dataField[0] != '"' {
+		t.Errorf("'data' field should be a JSON string (base64), got: %s", dataField)
+	}
+
+	// Unmarshal round-trip
+	var got ReasoningFileContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if got.MediaType != r.MediaType {
+		t.Errorf("MediaType = %q, want %q", got.MediaType, r.MediaType)
+	}
+	if len(got.Data) != len(original) {
+		t.Fatalf("Data length = %d, want %d", len(got.Data), len(original))
+	}
+	for i, b := range original {
+		if got.Data[i] != b {
+			t.Errorf("Data[%d] = %02x, want %02x", i, got.Data[i], b)
+		}
+	}
+}
+
+// TestReasoningFileContentBinary verifies that arbitrary binary data
+// (including zero bytes) round-trips correctly.
+func TestReasoningFileContentBinary(t *testing.T) {
+	binary := make([]byte, 256)
+	for i := range binary {
+		binary[i] = byte(i)
+	}
+	r := ReasoningFileContent{
+		MediaType:        "application/octet-stream",
+		Data:             binary,
+		ProviderMetadata: json.RawMessage(`{"source":"model"}`),
+	}
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var got ReasoningFileContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(got.Data) != len(binary) {
+		t.Fatalf("Data length = %d, want %d", len(got.Data), len(binary))
+	}
+	for i, b := range binary {
+		if got.Data[i] != b {
+			t.Errorf("Data[%d] = %02x, want %02x", i, got.Data[i], b)
+		}
+	}
+	if string(got.ProviderMetadata) != `{"source":"model"}` {
+		t.Errorf("ProviderMetadata = %s, want {\"source\":\"model\"}", got.ProviderMetadata)
+	}
+}
+
+// TestGenerateResultContainsCustomContent verifies that GenerateResult.Content
+// can hold CustomContent parts.
+func TestGenerateResultContainsCustomContent(t *testing.T) {
+	result := GenerateResult{
+		Text: "hello",
+		Content: []ContentPart{
+			CustomContent{
+				Kind:             "xai-citation",
+				ProviderMetadata: json.RawMessage(`{"url":"https://x.ai"}`),
+			},
+		},
+	}
+
+	if len(result.Content) != 1 {
+		t.Fatalf("Content length = %d, want 1", len(result.Content))
+	}
+	cc, ok := result.Content[0].(CustomContent)
+	if !ok {
+		t.Fatal("Content[0] should be CustomContent")
+	}
+	if cc.Kind != "xai-citation" {
+		t.Errorf("Kind = %q, want \"xai-citation\"", cc.Kind)
+	}
+}
+
+// TestGenerateResultContainsReasoningFile verifies that GenerateResult.Content
+// can hold ReasoningFileContent parts.
+func TestGenerateResultContainsReasoningFile(t *testing.T) {
+	result := GenerateResult{
+		Text: "here is a chart",
+		Content: []ContentPart{
+			ReasoningFileContent{
+				MediaType: "image/png",
+				Data:      []byte{0x89, 0x50, 0x4E, 0x47},
+			},
+		},
+	}
+
+	if len(result.Content) != 1 {
+		t.Fatalf("Content length = %d, want 1", len(result.Content))
+	}
+	rf, ok := result.Content[0].(ReasoningFileContent)
+	if !ok {
+		t.Fatal("Content[0] should be ReasoningFileContent")
+	}
+	if rf.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want \"image/png\"", rf.MediaType)
+	}
+}
+
+// TestSourceContentURL verifies SourceContent for a URL source.
+func TestSourceContentURL(t *testing.T) {
+	s := SourceContent{
+		SourceType: "url",
+		ID:         "src-1",
+		URL:        "https://example.com/article",
+		Title:      "Example Article",
+	}
+	if s.ContentType() != "source" {
+		t.Errorf("ContentType() = %q, want \"source\"", s.ContentType())
+	}
+
+	// Verify it implements ContentPart
+	var _ ContentPart = s
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	var got SourceContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if got.SourceType != "url" {
+		t.Errorf("SourceType = %q, want \"url\"", got.SourceType)
+	}
+	if got.URL != "https://example.com/article" {
+		t.Errorf("URL = %q, want \"https://example.com/article\"", got.URL)
+	}
+	if got.Title != "Example Article" {
+		t.Errorf("Title = %q, want \"Example Article\"", got.Title)
+	}
+}
+
+// TestSourceContentDocument verifies SourceContent for a document source.
+func TestSourceContentDocument(t *testing.T) {
+	s := SourceContent{
+		SourceType: "document",
+		ID:         "doc-1",
+		MediaType:  "application/pdf",
+		Title:      "Research Paper",
+		Filename:   "paper.pdf",
+		ProviderMetadata: json.RawMessage(`{"pages":42}`),
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	var got SourceContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if got.SourceType != "document" {
+		t.Errorf("SourceType = %q, want \"document\"", got.SourceType)
+	}
+	if got.MediaType != "application/pdf" {
+		t.Errorf("MediaType = %q, want \"application/pdf\"", got.MediaType)
+	}
+	if got.Filename != "paper.pdf" {
+		t.Errorf("Filename = %q, want \"paper.pdf\"", got.Filename)
+	}
+	if string(got.ProviderMetadata) != `{"pages":42}` {
+		t.Errorf("ProviderMetadata = %s, want {\"pages\":42}", got.ProviderMetadata)
+	}
+}
+
+// TestGeneratedFileContent verifies GeneratedFileContent base64 round-trip.
+func TestGeneratedFileContent(t *testing.T) {
+	data := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
+	f := GeneratedFileContent{
+		MediaType: "image/png",
+		Data:      data,
+	}
+	if f.ContentType() != "file" {
+		t.Errorf("ContentType() = %q, want \"file\"", f.ContentType())
+	}
+
+	// Verify it implements ContentPart
+	var _ ContentPart = f
+
+	encoded, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	// data field must be a base64 JSON string
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatalf("failed to parse marshaled JSON: %v", err)
+	}
+	if raw["data"][0] != '"' {
+		t.Errorf("data field should be base64 string, got: %s", raw["data"])
+	}
+
+	var got GeneratedFileContent
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if got.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want \"image/png\"", got.MediaType)
+	}
+	for i, b := range data {
+		if got.Data[i] != b {
+			t.Errorf("Data[%d] = %02x, want %02x", i, got.Data[i], b)
+		}
+	}
+}
+
+// TestCustomContentProviderOptions verifies that CustomContent.ProviderOptions
+// is preserved through JSON round-trip (input/prompt direction).
+func TestCustomContentProviderOptions(t *testing.T) {
+	c := CustomContent{
+		Kind: "anthropic-tool-reference",
+		ProviderOptions: map[string]interface{}{
+			"anthropic": map[string]interface{}{
+				"type":     "tool-reference",
+				"toolName": "calc",
+			},
+		},
+	}
+
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var got CustomContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if got.Kind != c.Kind {
+		t.Errorf("Kind = %q, want %q", got.Kind, c.Kind)
+	}
+	if got.ProviderOptions == nil {
+		t.Fatal("ProviderOptions should not be nil after round-trip")
+	}
+	anthropicOpts, ok := got.ProviderOptions["anthropic"].(map[string]interface{})
+	if !ok {
+		t.Fatal("ProviderOptions[\"anthropic\"] should be a map")
+	}
+	if anthropicOpts["type"] != "tool-reference" {
+		t.Errorf("type = %v, want \"tool-reference\"", anthropicOpts["type"])
+	}
+}
+
+// TestReasoningFileContentProviderOptions verifies that ReasoningFileContent.ProviderOptions
+// is preserved through JSON round-trip (input/prompt direction).
+func TestReasoningFileContentProviderOptions(t *testing.T) {
+	r := ReasoningFileContent{
+		MediaType: "image/png",
+		Data:      []byte{0x89, 0x50, 0x4E, 0x47},
+		ProviderOptions: map[string]interface{}{
+			"anthropic": map[string]interface{}{"cacheControl": "ephemeral"},
+		},
+	}
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var got ReasoningFileContent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if got.MediaType != r.MediaType {
+		t.Errorf("MediaType = %q, want %q", got.MediaType, r.MediaType)
+	}
+	if got.ProviderOptions == nil {
+		t.Fatal("ProviderOptions should not be nil after round-trip")
+	}
+	anthropicOpts, ok := got.ProviderOptions["anthropic"].(map[string]interface{})
+	if !ok {
+		t.Fatal("ProviderOptions[\"anthropic\"] should be a map")
+	}
+	if anthropicOpts["cacheControl"] != "ephemeral" {
+		t.Errorf("cacheControl = %v, want \"ephemeral\"", anthropicOpts["cacheControl"])
+	}
+}
+
+// TestGenerateResultContainsSourceContent verifies GenerateResult.Content
+// can hold SourceContent parts.
+func TestGenerateResultContainsSourceContent(t *testing.T) {
+	result := GenerateResult{
+		Text: "See references.",
+		Content: []ContentPart{
+			SourceContent{SourceType: "url", ID: "s1", URL: "https://x.ai"},
+			SourceContent{SourceType: "url", ID: "s2", URL: "https://docs.x.ai"},
+		},
+	}
+	if len(result.Content) != 2 {
+		t.Fatalf("Content length = %d, want 2", len(result.Content))
+	}
+	src, ok := result.Content[0].(SourceContent)
+	if !ok {
+		t.Fatal("Content[0] should be SourceContent")
+	}
+	if src.URL != "https://x.ai" {
+		t.Errorf("URL = %q, want \"https://x.ai\"", src.URL)
 	}
 }
 

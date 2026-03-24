@@ -921,3 +921,430 @@ func TestStreamTextChunksDeliveredBeforeToolCallback(t *testing.T) {
 			executeIdx, toolCallChunkIdx, events)
 	}
 }
+
+// TestStreamEmitsReasoningFile verifies that a provider can emit a
+// ChunkTypeReasoningFile chunk and that it flows through to the OnChunk consumer.
+func TestStreamEmitsReasoningFile(t *testing.T) {
+	t.Parallel()
+
+	fileData := []byte{0x89, 0x50, 0x4E, 0x47} // PNG header
+	rfContent := &types.ReasoningFileContent{
+		MediaType: "image/png",
+		Data:      fileData,
+	}
+
+	model := &testutil.MockLanguageModel{
+		DoStreamFunc: func(ctx context.Context, opts *provider.GenerateOptions) (provider.TextStream, error) {
+			return testutil.NewMockTextStream([]provider.StreamChunk{
+				{Type: provider.ChunkTypeText, Text: "Here is a chart:"},
+				{Type: provider.ChunkTypeReasoningFile, ReasoningFileContent: rfContent},
+				{Type: provider.ChunkTypeFinish, FinishReason: types.FinishReasonStop},
+			}), nil
+		},
+	}
+
+	var mu sync.Mutex
+	var receivedChunks []provider.StreamChunk
+	done := make(chan struct{})
+
+	_, err := StreamText(context.Background(), StreamTextOptions{
+		Model:  model,
+		Prompt: "Generate a chart",
+		OnChunk: func(chunk provider.StreamChunk) {
+			mu.Lock()
+			receivedChunks = append(receivedChunks, chunk)
+			mu.Unlock()
+		},
+		OnFinish: func(r *StreamTextResult) {
+			close(done)
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Wait for processStream goroutine to finish.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not complete within timeout")
+	}
+
+	mu.Lock()
+	chunks := make([]provider.StreamChunk, len(receivedChunks))
+	copy(chunks, receivedChunks)
+	mu.Unlock()
+
+	// Find the reasoning-file chunk among received chunks
+	var rfChunk *provider.StreamChunk
+	for i := range chunks {
+		if chunks[i].Type == provider.ChunkTypeReasoningFile {
+			rfChunk = &chunks[i]
+			break
+		}
+	}
+	if rfChunk == nil {
+		t.Fatal("reasoning-file chunk was not emitted to OnChunk consumer")
+	}
+	if rfChunk.ReasoningFileContent == nil {
+		t.Fatal("ReasoningFileContent field is nil in reasoning-file chunk")
+	}
+	if rfChunk.ReasoningFileContent.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want \"image/png\"", rfChunk.ReasoningFileContent.MediaType)
+	}
+	if len(rfChunk.ReasoningFileContent.Data) != len(fileData) {
+		t.Errorf("Data length = %d, want %d", len(rfChunk.ReasoningFileContent.Data), len(fileData))
+	}
+}
+
+// TestStreamEmitsSourceContent verifies that a ChunkTypeSource chunk flows
+// through to the OnChunk consumer.
+func TestStreamEmitsSourceContent(t *testing.T) {
+	t.Parallel()
+
+	srcContent := &types.SourceContent{
+		SourceType: "url",
+		ID:         "src-1",
+		URL:        "https://example.com",
+		Title:      "Example",
+	}
+
+	model := &testutil.MockLanguageModel{
+		DoStreamFunc: func(ctx context.Context, opts *provider.GenerateOptions) (provider.TextStream, error) {
+			return testutil.NewMockTextStream([]provider.StreamChunk{
+				{Type: provider.ChunkTypeText, Text: "According to sources:"},
+				{Type: provider.ChunkTypeSource, SourceContent: srcContent},
+				{Type: provider.ChunkTypeFinish, FinishReason: types.FinishReasonStop},
+			}), nil
+		},
+	}
+
+	var mu sync.Mutex
+	var receivedChunks []provider.StreamChunk
+	done := make(chan struct{})
+
+	_, err := StreamText(context.Background(), StreamTextOptions{
+		Model:  model,
+		Prompt: "Tell me something sourced",
+		OnChunk: func(chunk provider.StreamChunk) {
+			mu.Lock()
+			receivedChunks = append(receivedChunks, chunk)
+			mu.Unlock()
+		},
+		OnFinish: func(r *StreamTextResult) { close(done) },
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not complete within timeout")
+	}
+
+	mu.Lock()
+	chunks := make([]provider.StreamChunk, len(receivedChunks))
+	copy(chunks, receivedChunks)
+	mu.Unlock()
+
+	var found *provider.StreamChunk
+	for i := range chunks {
+		if chunks[i].Type == provider.ChunkTypeSource {
+			found = &chunks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("source chunk was not emitted to OnChunk consumer")
+	}
+	if found.SourceContent == nil {
+		t.Fatal("SourceContent field is nil in source chunk")
+	}
+	if found.SourceContent.URL != "https://example.com" {
+		t.Errorf("URL = %q, want \"https://example.com\"", found.SourceContent.URL)
+	}
+}
+
+// TestStreamEmitsGeneratedFile verifies that a ChunkTypeFile chunk flows
+// through to the OnChunk consumer.
+func TestStreamEmitsGeneratedFile(t *testing.T) {
+	t.Parallel()
+
+	fileData := []byte{0x89, 0x50, 0x4E, 0x47}
+	gfc := &types.GeneratedFileContent{
+		MediaType: "image/png",
+		Data:      fileData,
+	}
+
+	model := &testutil.MockLanguageModel{
+		DoStreamFunc: func(ctx context.Context, opts *provider.GenerateOptions) (provider.TextStream, error) {
+			return testutil.NewMockTextStream([]provider.StreamChunk{
+				{Type: provider.ChunkTypeText, Text: "Here is the generated image."},
+				{Type: provider.ChunkTypeFile, GeneratedFileContent: gfc},
+				{Type: provider.ChunkTypeFinish, FinishReason: types.FinishReasonStop},
+			}), nil
+		},
+	}
+
+	var mu sync.Mutex
+	var receivedChunks []provider.StreamChunk
+	done := make(chan struct{})
+
+	_, err := StreamText(context.Background(), StreamTextOptions{
+		Model:  model,
+		Prompt: "Generate an image",
+		OnChunk: func(chunk provider.StreamChunk) {
+			mu.Lock()
+			receivedChunks = append(receivedChunks, chunk)
+			mu.Unlock()
+		},
+		OnFinish: func(r *StreamTextResult) { close(done) },
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not complete within timeout")
+	}
+
+	mu.Lock()
+	chunks := make([]provider.StreamChunk, len(receivedChunks))
+	copy(chunks, receivedChunks)
+	mu.Unlock()
+
+	var found *provider.StreamChunk
+	for i := range chunks {
+		if chunks[i].Type == provider.ChunkTypeFile {
+			found = &chunks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("file chunk was not emitted to OnChunk consumer")
+	}
+	if found.GeneratedFileContent == nil {
+		t.Fatal("GeneratedFileContent field is nil in file chunk")
+	}
+	if found.GeneratedFileContent.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want \"image/png\"", found.GeneratedFileContent.MediaType)
+	}
+}
+
+// TestStreamEmitsCustomContent verifies that a provider can emit a
+// ChunkTypeCustom chunk and that it flows through to the OnChunk consumer.
+func TestStreamEmitsCustomContent(t *testing.T) {
+	t.Parallel()
+
+	ccContent := &types.CustomContent{
+		Kind: "mock-citation",
+	}
+
+	model := &testutil.MockLanguageModel{
+		DoStreamFunc: func(ctx context.Context, opts *provider.GenerateOptions) (provider.TextStream, error) {
+			return testutil.NewMockTextStream([]provider.StreamChunk{
+				{Type: provider.ChunkTypeText, Text: "See citation."},
+				{Type: provider.ChunkTypeCustom, CustomContent: ccContent},
+				{Type: provider.ChunkTypeFinish, FinishReason: types.FinishReasonStop},
+			}), nil
+		},
+	}
+
+	var mu sync.Mutex
+	var receivedChunks []provider.StreamChunk
+	done := make(chan struct{})
+
+	_, err := StreamText(context.Background(), StreamTextOptions{
+		Model:  model,
+		Prompt: "Tell me something with citations",
+		OnChunk: func(chunk provider.StreamChunk) {
+			mu.Lock()
+			receivedChunks = append(receivedChunks, chunk)
+			mu.Unlock()
+		},
+		OnFinish: func(r *StreamTextResult) {
+			close(done)
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not complete within timeout")
+	}
+
+	mu.Lock()
+	chunks := make([]provider.StreamChunk, len(receivedChunks))
+	copy(chunks, receivedChunks)
+	mu.Unlock()
+
+	var customChunk *provider.StreamChunk
+	for i := range chunks {
+		if chunks[i].Type == provider.ChunkTypeCustom {
+			customChunk = &chunks[i]
+			break
+		}
+	}
+	if customChunk == nil {
+		t.Fatal("custom chunk was not emitted to OnChunk consumer")
+	}
+	if customChunk.CustomContent == nil {
+		t.Fatal("CustomContent field is nil in custom chunk")
+	}
+	if customChunk.CustomContent.Kind != "mock-citation" {
+		t.Errorf("Kind = %q, want \"mock-citation\"", customChunk.CustomContent.Kind)
+	}
+}
+
+// TestStreamEmitsTextBlockBoundaries verifies that ChunkTypeTextStart and
+// ChunkTypeTextEnd flow through to the OnChunk consumer with their block IDs,
+// and that only ChunkTypeText deltas contribute to the accumulated text.
+func TestStreamEmitsTextBlockBoundaries(t *testing.T) {
+	t.Parallel()
+
+	model := &testutil.MockLanguageModel{
+		DoStreamFunc: func(ctx context.Context, opts *provider.GenerateOptions) (provider.TextStream, error) {
+			return testutil.NewMockTextStream([]provider.StreamChunk{
+				{Type: provider.ChunkTypeTextStart, ID: "block-1"},
+				{Type: provider.ChunkTypeText, ID: "block-1", Text: "hello"},
+				{Type: provider.ChunkTypeTextEnd, ID: "block-1"},
+				{Type: provider.ChunkTypeFinish, FinishReason: types.FinishReasonStop},
+			}), nil
+		},
+	}
+
+	var mu sync.Mutex
+	var receivedChunks []provider.StreamChunk
+	done := make(chan struct{})
+
+	result, err := StreamText(context.Background(), StreamTextOptions{
+		Model:  model,
+		Prompt: "Say hello",
+		OnChunk: func(chunk provider.StreamChunk) {
+			mu.Lock()
+			receivedChunks = append(receivedChunks, chunk)
+			mu.Unlock()
+		},
+		OnFinish: func(r *StreamTextResult) {
+			close(done)
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not complete within timeout")
+	}
+
+	// Only ChunkTypeText deltas should accumulate into result.Text.
+	if text := result.Text(); text != "hello" {
+		t.Errorf("Text = %q, want \"hello\"", text)
+	}
+
+	mu.Lock()
+	chunks := make([]provider.StreamChunk, len(receivedChunks))
+	copy(chunks, receivedChunks)
+	mu.Unlock()
+
+	// Verify start and end chunks were forwarded with the correct ID.
+	var startChunk, endChunk *provider.StreamChunk
+	for i := range chunks {
+		switch chunks[i].Type {
+		case provider.ChunkTypeTextStart:
+			startChunk = &chunks[i]
+		case provider.ChunkTypeTextEnd:
+			endChunk = &chunks[i]
+		}
+	}
+	if startChunk == nil {
+		t.Fatal("text-start chunk was not forwarded to OnChunk")
+	}
+	if startChunk.ID != "block-1" {
+		t.Errorf("text-start ID = %q, want \"block-1\"", startChunk.ID)
+	}
+	if endChunk == nil {
+		t.Fatal("text-end chunk was not forwarded to OnChunk")
+	}
+	if endChunk.ID != "block-1" {
+		t.Errorf("text-end ID = %q, want \"block-1\"", endChunk.ID)
+	}
+}
+
+// TestStreamEmitsReasoningBlockBoundaries verifies that ChunkTypeReasoningStart
+// and ChunkTypeReasoningEnd flow through to the OnChunk consumer with their IDs,
+// and that only ChunkTypeReasoning deltas affect the reasoning content.
+func TestStreamEmitsReasoningBlockBoundaries(t *testing.T) {
+	t.Parallel()
+
+	model := &testutil.MockLanguageModel{
+		DoStreamFunc: func(ctx context.Context, opts *provider.GenerateOptions) (provider.TextStream, error) {
+			return testutil.NewMockTextStream([]provider.StreamChunk{
+				{Type: provider.ChunkTypeReasoningStart, ID: "thinking-1"},
+				{Type: provider.ChunkTypeReasoning, ID: "thinking-1", Reasoning: "I think..."},
+				{Type: provider.ChunkTypeReasoningEnd, ID: "thinking-1"},
+				{Type: provider.ChunkTypeText, Text: "Answer."},
+				{Type: provider.ChunkTypeFinish, FinishReason: types.FinishReasonStop},
+			}), nil
+		},
+	}
+
+	var mu sync.Mutex
+	var receivedChunks []provider.StreamChunk
+	done := make(chan struct{})
+
+	_, err := StreamText(context.Background(), StreamTextOptions{
+		Model:  model,
+		Prompt: "Think then answer",
+		OnChunk: func(chunk provider.StreamChunk) {
+			mu.Lock()
+			receivedChunks = append(receivedChunks, chunk)
+			mu.Unlock()
+		},
+		OnFinish: func(r *StreamTextResult) {
+			close(done)
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not complete within timeout")
+	}
+
+	mu.Lock()
+	chunks := make([]provider.StreamChunk, len(receivedChunks))
+	copy(chunks, receivedChunks)
+	mu.Unlock()
+
+	var startChunk, endChunk *provider.StreamChunk
+	for i := range chunks {
+		switch chunks[i].Type {
+		case provider.ChunkTypeReasoningStart:
+			startChunk = &chunks[i]
+		case provider.ChunkTypeReasoningEnd:
+			endChunk = &chunks[i]
+		}
+	}
+	if startChunk == nil {
+		t.Fatal("reasoning-start chunk was not forwarded to OnChunk")
+	}
+	if startChunk.ID != "thinking-1" {
+		t.Errorf("reasoning-start ID = %q, want \"thinking-1\"", startChunk.ID)
+	}
+	if endChunk == nil {
+		t.Fatal("reasoning-end chunk was not forwarded to OnChunk")
+	}
+	if endChunk.ID != "thinking-1" {
+		t.Errorf("reasoning-end ID = %q, want \"thinking-1\"", endChunk.ID)
+	}
+}
