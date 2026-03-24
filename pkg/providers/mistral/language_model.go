@@ -3,7 +3,6 @@ package mistral
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -302,88 +301,12 @@ type mistralUsage struct {
 	} `json:"completion_tokens_details,omitempty"`
 }
 
-type mistralStreamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-	} `json:"choices"`
-}
-
 type mistralStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+	*streaming.OpenAICompatStream
 }
 
 func newMistralStream(reader io.ReadCloser) *mistralStream {
-	return &mistralStream{reader: reader, parser: streaming.NewSSEParser(reader)}
-}
-
-func (s *mistralStream) Read(p []byte) (n int, err error)  { return s.reader.Read(p) }
-func (s *mistralStream) Close() error                      { return s.reader.Close() }
-func (s *mistralStream) Next() (*provider.StreamChunk, error) {
-	if s.err != nil {
-		return nil, s.err
+	return &mistralStream{
+		OpenAICompatStream: streaming.NewOpenAICompatStream(reader, mapMistralFinishReason),
 	}
-	event, err := s.parser.Next()
-	if err != nil {
-		s.err = err
-		return nil, err
-	}
-	if streaming.IsStreamDone(event) {
-		s.err = io.EOF
-		return nil, io.EOF
-	}
-	var chunkData mistralStreamChunk
-	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
-		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
-	}
-	if len(chunkData.Choices) > 0 {
-		choice := chunkData.Choices[0]
-		if choice.Delta.Content != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeText, Text: choice.Delta.Content}, nil
-		}
-		if len(choice.Delta.ToolCalls) > 0 {
-			tc := choice.Delta.ToolCalls[0]
-			var args map[string]interface{}
-			if tc.Function.Arguments != "" {
-				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-			}
-			return &provider.StreamChunk{
-				Type: provider.ChunkTypeToolCall,
-				ToolCall: &types.ToolCall{
-					ID:        tc.ID,
-					ToolName:  tc.Function.Name,
-					Arguments: args,
-				},
-			}, nil
-		}
-		if choice.FinishReason != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeFinish, FinishReason: mapMistralFinishReason(choice.FinishReason)}, nil
-		}
-	}
-	return s.Next()
-}
-func (s *mistralStream) Err() error {
-	if s.err == io.EOF {
-		return nil
-	}
-	return s.err
 }

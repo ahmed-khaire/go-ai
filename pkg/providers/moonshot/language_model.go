@@ -300,24 +300,30 @@ type moonshotToolCallFunction struct {
 // Streaming Implementation
 // ========================================================================
 
-// moonshotStream implements provider.TextStream for Moonshot streaming responses
+// moonshotStreamAccumToolCall holds partial tool call state accumulated across SSE deltas.
+type moonshotStreamAccumToolCall struct {
+	id        string
+	name      string
+	arguments string // concatenated JSON argument fragments
+}
+
+// moonshotStream implements provider.TextStream for Moonshot streaming responses.
+// Tool calls are accumulated across deltas and flushed only at finish_reason.
 type moonshotStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+	reader        io.ReadCloser
+	parser        *streaming.SSEParser
+	err           error
+	toolCallAccum map[int]*moonshotStreamAccumToolCall
+	flushQueue    []*provider.StreamChunk
 }
 
 // newMoonshotStream creates a new Moonshot stream
 func newMoonshotStream(reader io.ReadCloser) *moonshotStream {
 	return &moonshotStream{
-		reader: reader,
-		parser: streaming.NewSSEParser(reader),
+		reader:        reader,
+		parser:        streaming.NewSSEParser(reader),
+		toolCallAccum: make(map[int]*moonshotStreamAccumToolCall),
 	}
-}
-
-// Read implements io.Reader
-func (s *moonshotStream) Read(p []byte) (n int, err error) {
-	return s.reader.Read(p)
 }
 
 // Close implements io.Closer
@@ -327,6 +333,13 @@ func (s *moonshotStream) Close() error {
 
 // Next returns the next chunk in the stream
 func (s *moonshotStream) Next() (*provider.StreamChunk, error) {
+	// Drain flush queue first
+	if len(s.flushQueue) > 0 {
+		chunk := s.flushQueue[0]
+		s.flushQueue = s.flushQueue[1:]
+		return chunk, nil
+	}
+
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -344,12 +357,23 @@ func (s *moonshotStream) Next() (*provider.StreamChunk, error) {
 		return nil, io.EOF
 	}
 
-	// Parse the event data as JSON
+	// Streaming deltas use string argument fragments (same as OpenAI-compat format).
+	// The non-streaming moonshotToolCall type (json.RawMessage) is only used for
+	// complete responses. The index field identifies which tool call each fragment
+	// belongs to across multiple events.
 	var chunkData struct {
 		Choices []struct {
 			Delta struct {
-				Content   string              `json:"content"`
-				ToolCalls []moonshotToolCall  `json:"tool_calls,omitempty"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Index    int    `json:"index"`
+					ID       string `json:"id"`
+					Type     string `json:"type"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"` // string fragment, not RawMessage
+					} `json:"function"`
+				} `json:"tool_calls,omitempty"`
 			} `json:"delta"`
 			FinishReason *string `json:"finish_reason"`
 		} `json:"choices"`
@@ -360,11 +384,10 @@ func (s *moonshotStream) Next() (*provider.StreamChunk, error) {
 		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
 	}
 
-	// Extract chunk data
 	if len(chunkData.Choices) > 0 {
 		choice := chunkData.Choices[0]
 
-		// Text chunk
+		// Text chunk — emit immediately.
 		if choice.Delta.Content != "" {
 			return &provider.StreamChunk{
 				Type: provider.ChunkTypeText,
@@ -372,43 +395,59 @@ func (s *moonshotStream) Next() (*provider.StreamChunk, error) {
 			}, nil
 		}
 
-		// Tool call chunk
+		// Tool call delta — accumulate, never emit yet.
 		if len(choice.Delta.ToolCalls) > 0 {
-			// Handle streaming tool calls
-			toolCall := choice.Delta.ToolCalls[0]
-			var args map[string]interface{}
-			if len(toolCall.Function.Arguments) > 0 {
-				if err := json.Unmarshal(toolCall.Function.Arguments, &args); err != nil {
-					args = make(map[string]interface{})
+			for _, tc := range choice.Delta.ToolCalls {
+				accum, ok := s.toolCallAccum[tc.Index]
+				if !ok {
+					accum = &moonshotStreamAccumToolCall{}
+					s.toolCallAccum[tc.Index] = accum
 				}
-			} else {
-				args = make(map[string]interface{})
+				if tc.ID != "" {
+					accum.id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					accum.name = tc.Function.Name
+				}
+				accum.arguments += tc.Function.Arguments
 			}
-
-			return &provider.StreamChunk{
-				Type: provider.ChunkTypeToolCall,
-				ToolCall: &types.ToolCall{
-					ID:        toolCall.ID,
-					ToolName:  toolCall.Function.Name,
-					Arguments: args,
-				},
-			}, nil
+			return s.Next()
 		}
 
-		// Finish chunk with usage
-		if choice.FinishReason != nil {
-			chunk := &provider.StreamChunk{
+		// Finish event — flush all accumulated tool calls, then emit finish.
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			for i := 0; i < len(s.toolCallAccum); i++ {
+				accum, ok := s.toolCallAccum[i]
+				if !ok {
+					continue
+				}
+				var args map[string]interface{}
+				if accum.arguments != "" {
+					json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
+				}
+				if args == nil {
+					args = make(map[string]interface{})
+				}
+				s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
+					Type: provider.ChunkTypeToolCall,
+					ToolCall: &types.ToolCall{
+						ID:        accum.id,
+						ToolName:  accum.name,
+						Arguments: args,
+					},
+				})
+			}
+
+			finishChunk := &provider.StreamChunk{
 				Type:         provider.ChunkTypeFinish,
 				FinishReason: providerutils.MapOpenAIFinishReason(*choice.FinishReason),
 			}
-
-			// Add usage if present
 			if chunkData.Usage != nil {
 				usage := ConvertMoonshotUsage(*chunkData.Usage)
-				chunk.Usage = &usage
+				finishChunk.Usage = &usage
 			}
-
-			return chunk, nil
+			s.flushQueue = append(s.flushQueue, finishChunk)
+			return s.Next()
 		}
 	}
 

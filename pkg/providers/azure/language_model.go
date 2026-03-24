@@ -339,126 +339,14 @@ type azureUsage struct {
 	} `json:"completion_tokens_details,omitempty"`
 }
 
-type azureStreamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-	} `json:"choices"`
-}
-
 // azureStream implements provider.TextStream for Azure OpenAI streaming
 type azureStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+	*streaming.OpenAICompatStream
 }
 
 // newAzureStream creates a new Azure OpenAI stream
 func newAzureStream(reader io.ReadCloser) *azureStream {
 	return &azureStream{
-		reader: reader,
-		parser: streaming.NewSSEParser(reader),
+		OpenAICompatStream: streaming.NewOpenAICompatStream(reader, providerutils.MapOpenAIFinishReason),
 	}
-}
-
-// Read implements io.Reader
-func (s *azureStream) Read(p []byte) (n int, err error) {
-	return s.reader.Read(p)
-}
-
-// Close implements io.Closer
-func (s *azureStream) Close() error {
-	return s.reader.Close()
-}
-
-// Next returns the next chunk in the stream
-func (s *azureStream) Next() (*provider.StreamChunk, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-
-	// Get next SSE event
-	event, err := s.parser.Next()
-	if err != nil {
-		s.err = err
-		return nil, err
-	}
-
-	// Check for stream completion
-	if streaming.IsStreamDone(event) {
-		s.err = io.EOF
-		return nil, io.EOF
-	}
-
-	// Parse the event data as JSON
-	var chunkData azureStreamChunk
-	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
-		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
-	}
-
-	// Extract chunk data
-	if len(chunkData.Choices) > 0 {
-		choice := chunkData.Choices[0]
-
-		// Text chunk
-		if choice.Delta.Content != "" {
-			return &provider.StreamChunk{
-				Type: provider.ChunkTypeText,
-				Text: choice.Delta.Content,
-			}, nil
-		}
-
-		// Tool call chunk
-		if len(choice.Delta.ToolCalls) > 0 {
-			tc := choice.Delta.ToolCalls[0]
-			var args map[string]interface{}
-			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
-			}
-			return &provider.StreamChunk{
-				Type: provider.ChunkTypeToolCall,
-				ToolCall: &types.ToolCall{
-					ID:        tc.ID,
-					ToolName:  tc.Function.Name,
-					Arguments: args,
-				},
-			}, nil
-		}
-
-		// Finish chunk
-		if choice.FinishReason != "" {
-			return &provider.StreamChunk{
-				Type:         provider.ChunkTypeFinish,
-				FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason),
-			}, nil
-		}
-	}
-
-	// Empty chunk, get next
-	return s.Next()
-}
-
-// Err returns any error that occurred during streaming
-func (s *azureStream) Err() error {
-	if s.err == io.EOF {
-		return nil
-	}
-	return s.err
 }

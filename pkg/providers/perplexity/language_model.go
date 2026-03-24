@@ -2,8 +2,6 @@ package perplexity
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -211,62 +209,12 @@ type perplexityUsage struct {
 	} `json:"completion_tokens_details,omitempty"`
 }
 
-type perplexityStreamChunk struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"delta"`
-	} `json:"choices"`
-}
-
 type perplexityStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+	*streaming.OpenAICompatStream
 }
 
 func newPerplexityStream(reader io.ReadCloser) *perplexityStream {
-	return &perplexityStream{reader: reader, parser: streaming.NewSSEParser(reader)}
-}
-
-func (s *perplexityStream) Read(p []byte) (n int, err error)  { return s.reader.Read(p) }
-func (s *perplexityStream) Close() error                      { return s.reader.Close() }
-func (s *perplexityStream) Next() (*provider.StreamChunk, error) {
-	if s.err != nil {
-		return nil, s.err
+	return &perplexityStream{
+		OpenAICompatStream: streaming.NewOpenAICompatStream(reader, providerutils.MapOpenAIFinishReason),
 	}
-	event, err := s.parser.Next()
-	if err != nil {
-		s.err = err
-		return nil, err
-	}
-	if streaming.IsStreamDone(event) {
-		s.err = io.EOF
-		return nil, io.EOF
-	}
-	var chunkData perplexityStreamChunk
-	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
-		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
-	}
-	if len(chunkData.Choices) > 0 {
-		choice := chunkData.Choices[0]
-		if choice.Delta.Content != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeText, Text: choice.Delta.Content}, nil
-		}
-		if choice.FinishReason != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeFinish, FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason)}, nil
-		}
-	}
-	return s.Next()
-}
-func (s *perplexityStream) Err() error {
-	if s.err == io.EOF {
-		return nil
-	}
-	return s.err
 }

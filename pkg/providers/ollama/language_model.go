@@ -3,7 +3,6 @@ package ollama
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -253,88 +252,12 @@ type ollamaUsage struct {
 	} `json:"completion_tokens_details,omitempty"`
 }
 
-type ollamaStreamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-	} `json:"choices"`
-}
-
 type ollamaStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+	*streaming.OpenAICompatStream
 }
 
 func newOllamaStream(reader io.ReadCloser) *ollamaStream {
-	return &ollamaStream{reader: reader, parser: streaming.NewSSEParser(reader)}
-}
-
-func (s *ollamaStream) Read(p []byte) (n int, err error)  { return s.reader.Read(p) }
-func (s *ollamaStream) Close() error                      { return s.reader.Close() }
-func (s *ollamaStream) Next() (*provider.StreamChunk, error) {
-	if s.err != nil {
-		return nil, s.err
+	return &ollamaStream{
+		OpenAICompatStream: streaming.NewOpenAICompatStream(reader, providerutils.MapOpenAIFinishReason),
 	}
-	event, err := s.parser.Next()
-	if err != nil {
-		s.err = err
-		return nil, err
-	}
-	if streaming.IsStreamDone(event) {
-		s.err = io.EOF
-		return nil, io.EOF
-	}
-	var chunkData ollamaStreamChunk
-	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
-		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
-	}
-	if len(chunkData.Choices) > 0 {
-		choice := chunkData.Choices[0]
-		if choice.Delta.Content != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeText, Text: choice.Delta.Content}, nil
-		}
-		if len(choice.Delta.ToolCalls) > 0 {
-			tc := choice.Delta.ToolCalls[0]
-			var args map[string]interface{}
-			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
-			}
-			return &provider.StreamChunk{
-				Type: provider.ChunkTypeToolCall,
-				ToolCall: &types.ToolCall{
-					ID:        tc.ID,
-					ToolName:  tc.Function.Name,
-					Arguments: args,
-				},
-			}, nil
-		}
-		if choice.FinishReason != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeFinish, FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason)}, nil
-		}
-	}
-	return s.Next()
-}
-func (s *ollamaStream) Err() error {
-	if s.err == io.EOF {
-		return nil
-	}
-	return s.err
 }
