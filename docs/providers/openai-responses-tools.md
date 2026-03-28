@@ -1,6 +1,6 @@
 # OpenAI Responses API: Custom Tools & Shell Container Tools
 
-This guide covers the Custom Tool and Shell Container Tool types available in the OpenAI Responses API, and how to use them with the Go-AI SDK.
+This guide covers the Custom Tool, Tool Search, and Shell Container Tool types available in the OpenAI Responses API, and how to use them with the Go-AI SDK.
 
 ## Overview
 
@@ -10,6 +10,7 @@ The OpenAI Responses API supports several tool types beyond standard function ca
 |--------------|-----------------|----------------------------------------------|
 | Function     | `function`      | built-in (`types.Tool`)                      |
 | Custom       | `custom`        | `pkg/providers/openai/tool`                  |
+| Tool Search  | `tool_search`   | `pkg/providers/openai/tool`                  |
 | Local Shell  | `local_shell`   | `pkg/providers/openai/responses`             |
 | Shell        | `shell`         | `pkg/providers/openai/responses`             |
 | Apply Patch  | `apply_patch`   | `pkg/providers/openai/responses`             |
@@ -37,8 +38,8 @@ type CustomToolFormat struct {
     Definition *string // the grammar or regex string (grammar type only)
 }
 
+// CustomTool does not store a Name field — the name is supplied to ToTool("name").
 type CustomTool struct {
-    Name        string
     Description *string
     Format      *CustomToolFormat
 }
@@ -47,7 +48,7 @@ type CustomTool struct {
 ### Factory Function
 
 ```go
-func NewCustomTool(name string, opts ...CustomToolOption) CustomTool
+func NewCustomTool(opts ...CustomToolOption) CustomTool
 ```
 
 Available options:
@@ -57,6 +58,10 @@ openaitool.WithDescription(desc string) CustomToolOption
 openaitool.WithFormat(format CustomToolFormat) CustomToolOption
 ```
 
+The tool name is **not** stored in `CustomTool`. Supply it when calling `ToTool("name")` so
+the name is derived from the caller's context (e.g., the key in a tools map), matching the
+TypeScript SDK convention.
+
 ### Usage
 
 ```go
@@ -64,7 +69,7 @@ openaitool.WithFormat(format CustomToolFormat) CustomToolOption
 syntax := "lark"
 definition := `start: OBJECT`
 
-ct := openaitool.NewCustomTool("json-extractor",
+ct := openaitool.NewCustomTool(
     openaitool.WithDescription("Extract JSON from the provided text"),
     openaitool.WithFormat(openaitool.CustomToolFormat{
         Type:       "grammar",
@@ -73,8 +78,8 @@ ct := openaitool.NewCustomTool("json-extractor",
     }),
 )
 
-// Convert to types.Tool for use with PrepareTools or ai.GenerateText
-tool := ct.ToTool()
+// Convert to types.Tool — supply the name here
+tool := ct.ToTool("json-extractor")
 ```
 
 ```go
@@ -82,7 +87,7 @@ tool := ct.ToTool()
 syntax := "regex"
 definition := `^\d{4}-\d{2}-\d{2}$`
 
-ct := openaitool.NewCustomTool("date-extractor",
+ct := openaitool.NewCustomTool(
     openaitool.WithDescription("Extract a date in YYYY-MM-DD format"),
     openaitool.WithFormat(openaitool.CustomToolFormat{
         Type:       "grammar",
@@ -90,19 +95,21 @@ ct := openaitool.NewCustomTool("date-extractor",
         Definition: &definition,
     }),
 )
+tool := ct.ToTool("date-extractor")
 ```
 
 ```go
 // Custom tool with text format (unconstrained output)
-ct := openaitool.NewCustomTool("sentiment-analyzer",
+ct := openaitool.NewCustomTool(
     openaitool.WithDescription("Analyze the sentiment of the provided text"),
     openaitool.WithFormat(openaitool.CustomToolFormat{Type: "text"}),
 )
+tool := ct.ToTool("sentiment-analyzer")
 ```
 
 ### Wire Format
 
-When `ct.ToTool()` is passed through `responses.PrepareTools()`, it serializes to:
+When `ct.ToTool("name")` is passed through `responses.PrepareTools()`, it serializes to:
 
 ```json
 {
@@ -114,6 +121,72 @@ When `ct.ToTool()` is passed through `responses.PrepareTools()`, it serializes t
     "syntax": "lark",
     "definition": "start: OBJECT"
   }
+}
+```
+
+---
+
+## Tool Search
+
+The tool_search tool enables the model to search across deferred tools. There are two execution modes:
+
+- **Server mode** (default): OpenAI resolves tool matches internally. No `tool_search_call` event is emitted.
+- **Client mode**: The model emits a `tool_search_call` event. The client's `Execute` function is called with search arguments and should return matching tool names.
+
+### Factory Function
+
+```go
+type ToolSearchArgs struct {
+    Execution   string  // "server" (default) or "client"
+    Description string  // describes the search capability (client mode)
+    Parameters  map[string]interface{} // JSON schema for search arguments (client mode)
+    Execute     func(ctx, input, opts) (interface{}, error) // called in client mode
+}
+
+func ToolSearch(args ToolSearchArgs) types.Tool
+```
+
+### Usage
+
+```go
+// Server mode (default): OpenAI handles the search
+searchTool := openaitool.ToolSearch(openaitool.ToolSearchArgs{})
+```
+
+```go
+// Client mode: route tool_search_call events to your Execute function
+searchTool := openaitool.ToolSearch(openaitool.ToolSearchArgs{
+    Execution:   "client",
+    Description: "Find tools matching a query",
+    Parameters: map[string]interface{}{
+        "type": "object",
+        "properties": map[string]interface{}{
+            "query": map[string]interface{}{"type": "string"},
+        },
+        "required": []string{"query"},
+    },
+    Execute: func(ctx context.Context, input map[string]interface{}, opts types.ToolExecutionOptions) (interface{}, error) {
+        query, _ := input["query"].(string)
+        // Return tool names matching the query
+        return []string{"get_weather", "search_web"}, nil
+    },
+})
+```
+
+### Wire Format
+
+Server mode serializes to:
+```json
+{"type": "tool_search"}
+```
+
+Client mode serializes to:
+```json
+{
+  "type": "tool_search",
+  "execution": "client",
+  "description": "Find tools matching a query",
+  "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}
 }
 ```
 
@@ -231,8 +304,8 @@ memLimit := "4g"
 tools := responses.PrepareTools([]types.Tool{
     // Standard function tool
     {Name: "get_weather", Description: "Get weather"},
-    // Custom tool
-    openaitool.NewCustomTool("json-extractor").ToTool(),
+    // Custom tool — name supplied to ToTool("name")
+    openaitool.NewCustomTool().ToTool("json-extractor"),
     // Shell tools
     responses.NewLocalShellTool(),
     responses.NewShellTool(responses.WithShellEnvironment(responses.ShellEnvironment{
@@ -321,3 +394,36 @@ Full runnable examples are in:
 
 - `examples/providers/openai/responses/custom-tool-grammar/` — Custom tool grammar formats
 - `examples/providers/openai/responses/shell-tool/` — Shell container tool configurations
+- `examples/providers/openai/tool-search/` — Tool search (server and client modes)
+
+---
+
+## Server-Side Compaction
+
+When the Responses API compacts the conversation context server-side, it emits a
+`compaction` event in the SSE stream. The Go-AI SDK surfaces this as a
+`ChunkTypeCustom` stream chunk with `CustomContent{Kind: "openai-compaction"}`.
+
+The `ProviderMetadata` JSON on the chunk contains:
+
+| Field              | Description                                          |
+|--------------------|------------------------------------------------------|
+| `type`             | Always `"compaction"`                                |
+| `itemId`           | The item ID of the compacted item                    |
+| `encryptedContent` | Opaque encrypted context blob (forward in next turn) |
+
+### Converting a compaction event
+
+```go
+import "github.com/digitallysavvy/go-ai/pkg/providers/openai/responses"
+
+// In your streaming parser, when you receive a compaction event:
+event := responses.CompactionEvent{
+    Type:             "compaction",
+    ItemID:           "item_abc",
+    EncryptedContent: "enc_xyz...",
+}
+chunk := responses.CompactionEventToChunk(event)
+// chunk.Type == provider.ChunkTypeCustom
+// chunk.CustomContent.Kind == "openai-compaction"
+```

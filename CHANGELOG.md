@@ -5,6 +5,41 @@ All notable changes to the Go AI SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-03-27
+
+TS SDK parity pass + OpenAI Responses API client — commit range `429b88a79..HEAD`.
+
+### Added
+
+#### OpenAI Provider
+- **`ResponsesLanguageModel`** — full `/v1/responses` client (`pkg/providers/openai/responses_language_model.go`)
+  - `DoGenerate` and `DoStream` against the Responses API endpoint
+  - SSE streaming: handles `response.output_text.delta`, `response.function_call_arguments.delta`,
+    `response.reasoning_summary_text.delta`, `response.output_item.added/done`, `response.completed`
+  - Tool calls accumulate by `output_index`, flushed as `ChunkTypeToolCall` at `output_item.done`
+  - Reasoning chunks emitted as `ChunkTypeReasoning` deltas
+  - Supports `previousResponseId`, `store`, `reasoningEffort`, `serviceTier` provider options
+  - When `store=false` on a reasoning model, auto-appends `reasoning.encrypted_content` to `include[]`
+- **`Provider.ResponsesModel(modelID)`** factory in `provider.go`
+- **`ConvertPromptToInput`** helper (`pkg/providers/openai/responses/convert.go`) — converts
+  `types.Prompt` to Responses API `input[]` format, handling system/user/assistant/tool messages
+- **`ToolSearchOutputItem`** type added to `responses/api_types.go` (TS parity fix)
+- **`isReasoningModel()`** helper — `o1*`, `o3*`, `o4-mini*`, `gpt-5*` (excl. `gpt-5-chat*`)
+  allowlist used to select `"developer"` role for system messages on reasoning models
+- **`filterUnencryptedReasoningParts`** now wired into `buildRequestBody` — strips `ReasoningContent`
+  without `EncryptedContent` from assistant history when `store=false`
+
+#### Core SDK
+- `types.Message.ToolCalls []ToolCall` field — carries tool calls in assistant history messages
+
+### Fixed
+- **OpenAI wire format for multi-turn tool calls**: assistant messages in history now include
+  top-level `tool_calls` array; tool role messages use top-level `tool_call_id`. Fixes
+  `"messages with role 'tool' must be a response to a preceding message with 'tool_calls'"` error.
+  Affected: `ToOpenAIMessages` in `pkg/providerutils/prompt/converter.go` and `generate.go`
+
+---
+
 ## [Unreleased] - 2026-02-28
 
 TypeScript AI SDK parity update — commit range `c123363c0..ed17fe86d`
