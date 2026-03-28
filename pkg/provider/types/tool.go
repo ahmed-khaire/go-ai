@@ -156,6 +156,10 @@ type ToolCall struct {
 
 	// Arguments to pass to the tool
 	Arguments map[string]interface{} `json:"arguments"`
+
+	// ProviderExecuted indicates if this tool was executed by the provider (not locally).
+	// When true, the provider handled execution server-side (e.g., xAI file_search, web_search).
+	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 }
 
 // ToolResult represents the result of executing a tool

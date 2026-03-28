@@ -67,6 +67,10 @@ type ImageResult struct {
 
 	// Warnings from the provider
 	Warnings []Warning `json:"warnings,omitempty"`
+
+	// ProviderMetadata holds provider-specific metadata (e.g. cost tracking).
+	// Keyed by provider name (e.g. "xai").
+	ProviderMetadata map[string]interface{} `json:"providerMetadata,omitempty"`
 }
 
 // SpeechResult contains the result of a speech synthesis operation

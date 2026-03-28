@@ -24,6 +24,11 @@ type Message struct {
 	// Content parts of the message (text, images, tool results, etc.)
 	Content []ContentPart `json:"content"`
 
+	// ToolCalls holds tool calls made in this message (assistant messages only).
+	// Providers that require tool calls as a top-level field (e.g. OpenAI) use
+	// this field when converting messages to their wire format.
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+
 	// Optional name for the message sender
 	Name string `json:"name,omitempty"`
 }
@@ -69,6 +74,10 @@ type ReasoningContent struct {
 	// OpenAI Responses API. When present, callers must forward it verbatim in
 	// subsequent turns so the API can reconstruct the reasoning context.
 	EncryptedContent string `json:"encrypted_content,omitempty"`
+
+	// ProviderMetadata holds optional raw JSON metadata from the provider.
+	// Used to carry provider-specific fields (e.g. xAI reasoning item ID).
+	ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
 }
 
 // ContentType implements ContentPart interface

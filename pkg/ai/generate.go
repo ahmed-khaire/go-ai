@@ -448,10 +448,13 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (result *Genera
 			stepResult.ToolResults = toolResults
 			result.ToolResults = append(result.ToolResults, toolResults...)
 
-			// Add assistant message with tool calls to history
+			// Add assistant message with tool calls to history.
+			// ToolCalls must be carried on the message so providers that require
+			// a top-level tool_calls field (e.g. OpenAI) can emit it correctly.
 			assistantMsg := types.Message{
-				Role:    types.RoleAssistant,
-				Content: []types.ContentPart{},
+				Role:      types.RoleAssistant,
+				Content:   []types.ContentPart{},
+				ToolCalls: genResult.ToolCalls,
 			}
 			if genResult.Text != "" {
 				assistantMsg.Content = append(assistantMsg.Content, types.TextContent{Text: genResult.Text})

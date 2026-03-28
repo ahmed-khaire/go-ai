@@ -31,6 +31,19 @@ type OpenAICompatStream struct {
 	toolCallAccum      map[int]*openAICompatAccumToolCall
 	flushQueue         []*provider.StreamChunk
 	finishReasonMapper func(string) types.FinishReason
+	// OnExtraDelta is an optional hook called with raw SSE event bytes before
+	// standard delta processing. If it returns (chunk, true), that chunk is
+	// returned immediately. Return (nil, false) to fall through to standard
+	// processing. Use this to handle provider-specific delta fields (e.g. xAI's
+	// reasoning_content).
+	OnExtraDelta func(eventBytes []byte) (*provider.StreamChunk, bool)
+
+	// OnBeforeDelta is an optional hook called with raw SSE event bytes before
+	// standard delta processing. Any chunks it returns are prepended to the
+	// flush queue; standard processing continues regardless. Use this to inject
+	// additional chunks from top-level event fields that standard processing
+	// does not handle (e.g. xAI's top-level citations array).
+	OnBeforeDelta func(eventBytes []byte) []*provider.StreamChunk
 }
 
 // NewOpenAICompatStream creates a new OpenAICompatStream.
@@ -112,6 +125,21 @@ func (s *OpenAICompatStream) Next() (*provider.StreamChunk, error) {
 
 	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
 		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
+	}
+
+	// Pre-delta hook: enqueue extra chunks (e.g. top-level citations) before
+	// standard processing. Prepend so they drain before the finish chunk.
+	if s.OnBeforeDelta != nil {
+		if extra := s.OnBeforeDelta([]byte(event.Data)); len(extra) > 0 {
+			s.flushQueue = append(extra, s.flushQueue...)
+		}
+	}
+
+	// Provider-specific delta hook (e.g. xAI reasoning_content).
+	if s.OnExtraDelta != nil {
+		if chunk, handled := s.OnExtraDelta([]byte(event.Data)); handled {
+			return chunk, nil
+		}
 	}
 
 	if len(chunkData.Choices) > 0 {
