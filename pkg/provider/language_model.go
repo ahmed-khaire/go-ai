@@ -197,6 +197,9 @@ type StreamChunk struct {
 	// Useful for debugging and understanding stream termination
 	AbortReason string
 
+	// Warnings carries provider warnings surfaced on stream-start chunks.
+	Warnings []types.Warning
+
 	// CustomContent carries provider-specific content when Type is ChunkTypeCustom.
 	CustomContent *types.CustomContent
 
@@ -305,7 +308,24 @@ const (
 	// function tool.  The ToolCall field carries the tool call ID.  A
 	// ChunkTypeToolCall chunk with the fully parsed arguments always follows.
 	ChunkTypeToolInputEnd ChunkType = "tool-input-end"
+
+	// ChunkTypeStreamStart is the first chunk emitted by a stream that has
+	// pre-stream warnings (e.g. unsupported-setting).
+	// The Warnings field carries the warnings; the chunk has no text content.
+	// Consumers check chunk.Type == ChunkTypeStreamStart and read chunk.Warnings.
+	ChunkTypeStreamStart ChunkType = "stream-start"
 )
+
+// EmbedModelOptions contains options forwarded to the embedding provider on each call.
+// Mirrors the TS SDK's ProviderOptions pattern for generateText/generateImage.
+type EmbedModelOptions struct {
+	// ProviderOptions holds provider-specific options keyed by provider name.
+	// Example: map[string]interface{}{"openai": map[string]interface{}{"dimensions": 256}}
+	ProviderOptions map[string]interface{}
+
+	// Headers are additional HTTP headers to send with the request.
+	Headers map[string]string
+}
 
 // EmbeddingModel represents an embedding model
 type EmbeddingModel interface {
@@ -323,8 +343,9 @@ type EmbeddingModel interface {
 	SupportsParallelCalls() bool
 
 	// Embedding methods
-	DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error)
-	DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error)
+	// opts may be nil — callers that don't need provider options pass nil.
+	DoEmbed(ctx context.Context, input string, opts *EmbedModelOptions) (*types.EmbeddingResult, error)
+	DoEmbedMany(ctx context.Context, inputs []string, opts *EmbedModelOptions) (*types.EmbeddingsResult, error)
 }
 
 // ImageModel represents an image generation model

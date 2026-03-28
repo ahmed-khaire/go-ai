@@ -177,6 +177,13 @@ type StreamTextResult struct {
 	toolCalls   []types.ToolCall
 	toolResults []types.ToolResult
 
+	// providerMetadata accumulates provider-specific metadata from stream chunks.
+	// Protected by mu.
+	providerMetadata json.RawMessage
+
+	// warnings accumulated from stream-start chunks
+	warnings []types.Warning
+
 	// Structured event callbacks (v6.1 - P0-3)
 	// Stored here so processStream can fire them when the stream completes.
 	cbOnStepFinishEvent func(ctx context.Context, e OnStepFinishEvent)
@@ -372,6 +379,11 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 			r.mu.Unlock()
 		}
 
+		// Accumulate warnings from stream-start chunks
+		if chunk.Type == provider.ChunkTypeStreamStart {
+			r.warnings = append(r.warnings, chunk.Warnings...)
+		}
+
 		// Accumulate text
 		if chunk.Type == provider.ChunkTypeText {
 			r.text += chunk.Text
@@ -413,6 +425,13 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 			r.usage = *chunk.Usage
 		}
 
+		// Accumulate provider metadata from each chunk that carries it.
+		if len(chunk.ProviderMetadata) > 0 {
+			r.mu.Lock()
+			r.providerMetadata = chunk.ProviderMetadata
+			r.mu.Unlock()
+		}
+
 		// Forward chunk to consumer BEFORE any tool Execute fires (Fix 2).
 		if onChunk != nil {
 			onChunk(*chunk)
@@ -438,6 +457,7 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 			experimentalContext: r.cbExperimentalCtx,
 			functionID:          r.cbFuncID,
 			metadata:            r.cbMeta,
+			timeout:             r.timeout,
 		}
 		toolResults, _ = executeTools(ctx, pendingToolCalls, r.cbTools, r.cbExperimentalCtx, &r.usage, toolCallbacks)
 	}
@@ -479,15 +499,25 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 	}
 
 	// Fire OnFinish — integrations record output attributes and end their spans.
+	streamTelUsage := telemetry.TelemetryUsage{
+		InputTokens:  r.usage.InputTokens,
+		OutputTokens: r.usage.OutputTokens,
+		TotalTokens:  r.usage.TotalTokens,
+	}
+	if r.usage.InputDetails != nil {
+		streamTelUsage.NoCacheInputTokens = r.usage.InputDetails.NoCacheTokens
+		streamTelUsage.CacheReadInputTokens = r.usage.InputDetails.CacheReadTokens
+		streamTelUsage.CacheCreationInputTokens = r.usage.InputDetails.CacheWriteTokens
+	}
+	if r.usage.OutputDetails != nil {
+		streamTelUsage.OutputTextTokens = r.usage.OutputDetails.TextTokens
+		streamTelUsage.ReasoningTokens = r.usage.OutputDetails.ReasoningTokens
+	}
 	telemetry.FireOnFinish(r.telemetryCtx, telemetry.TelemetryFinishEvent{
 		FinishReason: string(r.finishReason),
-		Usage: telemetry.TelemetryUsage{
-			InputTokens:  r.usage.InputTokens,
-			OutputTokens: r.usage.OutputTokens,
-			TotalTokens:  r.usage.TotalTokens,
-		},
-		Text:     r.text,
-		Settings: r.telemetrySettings,
+		Usage:        streamTelUsage,
+		Text:         r.text,
+		Settings:     r.telemetrySettings,
 	})
 
 	// Mark stream as done before firing callbacks so callers that check
@@ -537,7 +567,7 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 		FinishReason:        r.finishReason,
 		Steps:               []types.StepResult{stepResult},
 		TotalUsage:          r.usage,
-		Warnings:            nil, // streaming is single-step; warnings surfaced via OnStepFinishEvent
+		Warnings:            r.warnings,
 		ExperimentalContext: r.cbExperimentalCtx,
 		FunctionID:          r.cbFuncID,
 		Metadata:            r.cbMeta,
@@ -679,6 +709,11 @@ func (r *StreamTextResult) ReadAll() (string, error) {
 			r.mu.Unlock()
 		}
 
+		// Accumulate warnings from stream-start chunks
+		if chunk.Type == provider.ChunkTypeStreamStart {
+			r.warnings = append(r.warnings, chunk.Warnings...)
+		}
+
 		// Accumulate text
 		if chunk.Type == provider.ChunkTypeText {
 			r.text += chunk.Text
@@ -716,6 +751,11 @@ func (r *StreamTextResult) ReadAll() (string, error) {
 		if chunk.Usage != nil {
 			r.usage = *chunk.Usage
 		}
+
+		// Accumulate provider metadata.
+		if len(chunk.ProviderMetadata) > 0 {
+			r.providerMetadata = chunk.ProviderMetadata
+		}
 	}
 
 	// Store collected tool calls.
@@ -739,15 +779,25 @@ func (r *StreamTextResult) ReadAll() (string, error) {
 	}
 
 	// Fire OnFinish — integrations record output attributes and end their spans.
+	readAllTelUsage := telemetry.TelemetryUsage{
+		InputTokens:  r.usage.InputTokens,
+		OutputTokens: r.usage.OutputTokens,
+		TotalTokens:  r.usage.TotalTokens,
+	}
+	if r.usage.InputDetails != nil {
+		readAllTelUsage.NoCacheInputTokens = r.usage.InputDetails.NoCacheTokens
+		readAllTelUsage.CacheReadInputTokens = r.usage.InputDetails.CacheReadTokens
+		readAllTelUsage.CacheCreationInputTokens = r.usage.InputDetails.CacheWriteTokens
+	}
+	if r.usage.OutputDetails != nil {
+		readAllTelUsage.OutputTextTokens = r.usage.OutputDetails.TextTokens
+		readAllTelUsage.ReasoningTokens = r.usage.OutputDetails.ReasoningTokens
+	}
 	telemetry.FireOnFinish(r.telemetryCtx, telemetry.TelemetryFinishEvent{
 		FinishReason: string(r.finishReason),
-		Usage: telemetry.TelemetryUsage{
-			InputTokens:  r.usage.InputTokens,
-			OutputTokens: r.usage.OutputTokens,
-			TotalTokens:  r.usage.TotalTokens,
-		},
-		Text:     r.text,
-		Settings: r.telemetrySettings,
+		Usage:        readAllTelUsage,
+		Text:         r.text,
+		Settings:     r.telemetrySettings,
 	})
 
 	// Mark stream as done.
@@ -789,6 +839,20 @@ func (r *StreamTextResult) nextChunk(ctx context.Context) (*provider.StreamChunk
 	case <-chunkCtx.Done():
 		return nil, fmt.Errorf("chunk timeout exceeded: %w", chunkCtx.Err())
 	}
+}
+
+// ProviderMetadata returns the most recently received provider-specific metadata
+// from stream chunks. Only populated when the provider emits metadata in chunks.
+// Safe to call concurrently with streaming.
+func (r *StreamTextResult) ProviderMetadata() json.RawMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.providerMetadata
+}
+
+// Warnings returns any provider warnings surfaced via stream-start chunks.
+func (r *StreamTextResult) Warnings() []types.Warning {
+	return r.warnings
 }
 
 // Chunks returns a channel that streams chunks

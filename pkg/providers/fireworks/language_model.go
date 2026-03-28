@@ -129,6 +129,21 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 			"type": opts.ResponseFormat.Type,
 		}
 	}
+	// Map top-level Reasoning to Fireworks reasoning_effort.
+	// none and provider-default → omit (Fireworks passes through the raw level string
+	// and only accepts supported values; none is excluded at the base layer).
+	// minimal/low → "low", medium → "medium", high/xhigh → "high".
+	if opts.Reasoning != nil {
+		switch *opts.Reasoning {
+		case types.ReasoningMinimal, types.ReasoningLow:
+			body["reasoning_effort"] = "low"
+		case types.ReasoningMedium:
+			body["reasoning_effort"] = "medium"
+		case types.ReasoningHigh, types.ReasoningXHigh:
+			body["reasoning_effort"] = "high"
+		// ReasoningNone and ReasoningDefault: omit
+		}
+	}
 
 	// Handle Fireworks-specific options (thinking and reasoning for Kimi K2.5)
 	if opts.ProviderOptions != nil {
@@ -305,7 +320,20 @@ type fireworksStream struct {
 }
 
 func newFireworksStream(reader io.ReadCloser) *fireworksStream {
-	return &fireworksStream{
-		OpenAICompatStream: streaming.NewOpenAICompatStream(reader, providerutils.MapOpenAIFinishReason),
+	s := streaming.NewOpenAICompatStream(reader, providerutils.MapOpenAIFinishReason)
+	s.OnReasoningDelta = func(eventBytes []byte) (string, bool) {
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					ReasoningContent string `json:"reasoning_content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(eventBytes, &chunk); err != nil || len(chunk.Choices) == 0 {
+			return "", false
+		}
+		rc := chunk.Choices[0].Delta.ReasoningContent
+		return rc, rc != ""
 	}
+	return &fireworksStream{OpenAICompatStream: s}
 }

@@ -44,6 +44,16 @@ type OpenAICompatStream struct {
 	// additional chunks from top-level event fields that standard processing
 	// does not handle (e.g. xAI's top-level citations array).
 	OnBeforeDelta func(eventBytes []byte) []*provider.StreamChunk
+
+	// OnReasoningDelta extracts reasoning text from the raw SSE event bytes.
+	// Called before standard text/tool processing. If it returns (text, true)
+	// where text != "", the stream manages reasoning-start/delta/end blocks.
+	// If it returns ("", true), hook handled it but no reasoning text (no-op).
+	// If it returns ("", false), standard processing continues unchanged.
+	OnReasoningDelta func(eventBytes []byte) (text string, ok bool)
+
+	// isActiveReasoning tracks whether we are inside a reasoning block.
+	isActiveReasoning bool
 }
 
 // NewOpenAICompatStream creates a new OpenAICompatStream.
@@ -142,11 +152,38 @@ func (s *OpenAICompatStream) Next() (*provider.StreamChunk, error) {
 		}
 	}
 
+	// Reasoning delta hook — manage start/end lifecycle.
+	if s.OnReasoningDelta != nil {
+		if rc, handled := s.OnReasoningDelta([]byte(event.Data)); handled && rc != "" {
+			if !s.isActiveReasoning {
+				s.isActiveReasoning = true
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningStart, ID: "reasoning-0"},
+					{Type: provider.ChunkTypeReasoning, Reasoning: rc, ID: "reasoning-0"},
+				}, s.flushQueue...)
+				return s.Next()
+			}
+			return &provider.StreamChunk{
+				Type:      provider.ChunkTypeReasoning,
+				Reasoning: rc,
+				ID:        "reasoning-0",
+			}, nil
+		}
+	}
+
 	if len(chunkData.Choices) > 0 {
 		choice := chunkData.Choices[0]
 
 		// Text delta — emit immediately.
 		if choice.Delta.Content != "" {
+			if s.isActiveReasoning {
+				s.isActiveReasoning = false
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"},
+					{Type: provider.ChunkTypeText, Text: choice.Delta.Content},
+				}, s.flushQueue...)
+				return s.Next()
+			}
 			return &provider.StreamChunk{
 				Type: provider.ChunkTypeText,
 				Text: choice.Delta.Content,
@@ -174,6 +211,12 @@ func (s *OpenAICompatStream) Next() (*provider.StreamChunk, error) {
 
 		// Finish event — flush all accumulated tool calls, then emit finish.
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			if s.isActiveReasoning {
+				s.isActiveReasoning = false
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"},
+				}, s.flushQueue...)
+			}
 			for i := 0; i < len(s.toolCallAccum); i++ {
 				accum, ok := s.toolCallAccum[i]
 				if !ok {

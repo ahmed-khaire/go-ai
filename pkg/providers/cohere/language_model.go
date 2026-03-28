@@ -3,6 +3,7 @@ package cohere
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
 	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
+	"github.com/digitallysavvy/go-ai/pkg/providerutils/prompt"
 	"github.com/digitallysavvy/go-ai/pkg/providerutils/streaming"
 )
 
@@ -60,12 +62,12 @@ func (m *LanguageModel) SupportsImageInput() bool {
 // DoGenerate performs non-streaming text generation
 func (m *LanguageModel) DoGenerate(ctx context.Context, opts *provider.GenerateOptions) (*types.GenerateResult, error) {
 	reqBody := m.buildRequestBody(opts)
-	var response cohereResponse
-	err := m.provider.client.PostJSON(ctx, "/v1/chat", reqBody, &response)
+	var response cohereV2Response
+	err := m.provider.client.PostJSON(ctx, "/v2/chat", reqBody, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
-	return m.convertResponse(response), nil
+	return m.convertV2Response(response), nil
 }
 
 // DoStream performs streaming text generation
@@ -74,59 +76,104 @@ func (m *LanguageModel) DoStream(ctx context.Context, opts *provider.GenerateOpt
 	reqBody["stream"] = true
 	httpResp, err := m.provider.client.DoStream(ctx, internalhttp.Request{
 		Method: http.MethodPost,
-		Path:   "/v1/chat",
+		Path:   "/v2/chat",
 		Body:   reqBody,
 	})
 	if err != nil {
 		return nil, m.handleError(err)
 	}
-	return newCohereStream(httpResp.Body), nil
+	return newCohereV2Stream(httpResp.Body), nil
 }
 
 func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions) map[string]interface{} {
 	body := map[string]interface{}{"model": m.modelID}
-	if opts.Prompt.IsSimple() {
-		body["message"] = opts.Prompt.Text
+	var messages []map[string]interface{}
+	if opts.Prompt.System != "" {
+		messages = append(messages, map[string]interface{}{
+			"role":    "system",
+			"content": opts.Prompt.System,
+		})
 	}
+	if opts.Prompt.IsSimple() {
+		messages = append(messages, map[string]interface{}{
+			"role":    "user",
+			"content": opts.Prompt.Text,
+		})
+	} else if opts.Prompt.IsMessages() {
+		messages = append(messages, prompt.ToOpenAIMessages(opts.Prompt.Messages)...)
+	}
+	body["messages"] = messages
 	if opts.Temperature != nil {
 		body["temperature"] = *opts.Temperature
 	}
 	if opts.MaxTokens != nil {
 		body["max_tokens"] = *opts.MaxTokens
 	}
+	if thinking := m.resolveThinking(opts); thinking != nil {
+		body["thinking"] = thinking
+	}
 	return body
 }
 
-func (m *LanguageModel) convertResponse(response cohereResponse) *types.GenerateResult {
-	return &types.GenerateResult{
-		Text:         response.Text,
-		FinishReason: types.FinishReasonStop,
-		Usage:        convertCohereUsage(response.Meta.Tokens),
-		RawResponse:  response,
+func (m *LanguageModel) resolveThinking(opts *provider.GenerateOptions) map[string]interface{} {
+	if opts.Reasoning == nil {
+		return nil
+	}
+	switch *opts.Reasoning {
+	case types.ReasoningNone:
+		return map[string]interface{}{"type": "disabled"}
+	case types.ReasoningMinimal:
+		return map[string]interface{}{"type": "enabled", "token_budget": 1024}
+	case types.ReasoningLow:
+		return map[string]interface{}{"type": "enabled", "token_budget": 3277}
+	case types.ReasoningMedium:
+		return map[string]interface{}{"type": "enabled", "token_budget": 9830}
+	case types.ReasoningHigh:
+		return map[string]interface{}{"type": "enabled", "token_budget": 19661}
+	case types.ReasoningXHigh:
+		return map[string]interface{}{"type": "enabled", "token_budget": 29491}
+	default:
+		return nil
 	}
 }
 
-func convertCohereUsage(tokens cohereTokens) types.Usage {
-	inputTokens := int64(tokens.InputTokens)
-	outputTokens := int64(tokens.OutputTokens)
+func (m *LanguageModel) convertV2Response(resp cohereV2Response) *types.GenerateResult {
+	result := &types.GenerateResult{
+		FinishReason: mapCohereV2FinishReason(resp.FinishReason),
+		RawResponse:  resp,
+	}
+	inputTokens := int64(resp.Usage.Tokens.InputTokens)
+	outputTokens := int64(resp.Usage.Tokens.OutputTokens)
 	totalTokens := inputTokens + outputTokens
-	result := types.Usage{
+	result.Usage = types.Usage{
 		InputTokens:  &inputTokens,
 		OutputTokens: &outputTokens,
 		TotalTokens:  &totalTokens,
 	}
-	result.InputDetails = &types.InputTokenDetails{
-		NoCacheTokens:    &inputTokens,
-		CacheReadTokens:  nil,
-		CacheWriteTokens: nil,
+	result.Usage.InputDetails = &types.InputTokenDetails{NoCacheTokens: &inputTokens}
+	result.Usage.OutputDetails = &types.OutputTokenDetails{TextTokens: &outputTokens}
+	result.Usage.Raw = map[string]interface{}{
+		"input_tokens":  resp.Usage.Tokens.InputTokens,
+		"output_tokens": resp.Usage.Tokens.OutputTokens,
 	}
-	result.OutputDetails = &types.OutputTokenDetails{
-		TextTokens:      &outputTokens,
-		ReasoningTokens: nil,
+	for _, item := range resp.Message.Content {
+		switch item.Type {
+		case "text":
+			result.Text += item.Text
+		case "thinking":
+			if item.Thinking != "" {
+				result.Content = append(result.Content, types.ReasoningContent{Text: item.Thinking})
+			}
+		}
 	}
-	result.Raw = map[string]interface{}{
-		"input_tokens":  tokens.InputTokens,
-		"output_tokens": tokens.OutputTokens,
+	for _, tc := range resp.Message.ToolCalls {
+		var args map[string]interface{}
+		json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
+		result.ToolCalls = append(result.ToolCalls, types.ToolCall{
+			ID:        tc.ID,
+			ToolName:  tc.Function.Name,
+			Arguments: args,
+		})
 	}
 	return result
 }
@@ -135,31 +182,88 @@ func (m *LanguageModel) handleError(err error) error {
 	return providererrors.NewProviderError("cohere", 0, "", err.Error(), err)
 }
 
-type cohereResponse struct {
-	Text string `json:"text"`
-	Meta struct {
-		Tokens cohereTokens `json:"tokens"`
-	} `json:"meta"`
+func mapCohereV2FinishReason(reason string) types.FinishReason {
+	switch reason {
+	case "COMPLETE":
+		return types.FinishReasonStop
+	case "MAX_TOKENS":
+		return types.FinishReasonLength
+	case "TOOL_CALL":
+		return types.FinishReasonToolCalls
+	case "ERROR":
+		return types.FinishReasonError
+	default:
+		return types.FinishReasonOther
+	}
 }
 
-type cohereTokens struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+type cohereV2Response struct {
+	GenerationID string `json:"generation_id"`
+	Message      struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type     string `json:"type"`
+			Text     string `json:"text,omitempty"`
+			Thinking string `json:"thinking,omitempty"`
+		} `json:"content"`
+		ToolCalls []struct {
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Function struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	} `json:"message"`
+	FinishReason string `json:"finish_reason"`
+	Usage        struct {
+		Tokens struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"tokens"`
+	} `json:"usage"`
 }
 
-type cohereStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+type cohereV2Stream struct {
+	reader            io.ReadCloser
+	parser            *streaming.SSEParser
+	err               error
+	flushQueue        []*provider.StreamChunk
+	contentType       map[int]string // index → "text" | "thinking"
+	pendingTools      map[string]*cohereV2PendingTool
+	isActiveReasoning bool
 }
 
-func newCohereStream(reader io.ReadCloser) *cohereStream {
-	return &cohereStream{reader: reader, parser: streaming.NewSSEParser(reader)}
+type cohereV2PendingTool struct {
+	id        string
+	name      string
+	arguments string
+	finished  bool
 }
 
-func (s *cohereStream) Read(p []byte) (n int, err error)  { return s.reader.Read(p) }
-func (s *cohereStream) Close() error                      { return s.reader.Close() }
-func (s *cohereStream) Next() (*provider.StreamChunk, error) {
+func newCohereV2Stream(reader io.ReadCloser) *cohereV2Stream {
+	return &cohereV2Stream{
+		reader:       reader,
+		parser:       streaming.NewSSEParser(reader),
+		contentType:  make(map[int]string),
+		pendingTools: make(map[string]*cohereV2PendingTool),
+	}
+}
+
+func (s *cohereV2Stream) Close() error { return s.reader.Close() }
+func (s *cohereV2Stream) Err() error {
+	if s.err == io.EOF {
+		return nil
+	}
+	return s.err
+}
+
+func (s *cohereV2Stream) Next() (*provider.StreamChunk, error) {
+	if len(s.flushQueue) > 0 {
+		chunk := s.flushQueue[0]
+		s.flushQueue = s.flushQueue[1:]
+		return chunk, nil
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -168,24 +272,187 @@ func (s *cohereStream) Next() (*provider.StreamChunk, error) {
 		s.err = err
 		return nil, err
 	}
-	var chunkData struct {
-		EventType string `json:"event_type"`
-		Text      string `json:"text"`
+	if streaming.IsStreamDone(event) {
+		s.err = io.EOF
+		return nil, io.EOF
 	}
-	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
-		return nil, err
+
+	// Cohere v2 SSE: each event has a type field plus a delta field.
+	var ev struct {
+		Type  string          `json:"type"`
+		Index int             `json:"index"`
+		Delta json.RawMessage `json:"delta"`
 	}
-	if chunkData.EventType == "text-generation" && chunkData.Text != "" {
-		return &provider.StreamChunk{Type: provider.ChunkTypeText, Text: chunkData.Text}, nil
+	if err := json.Unmarshal([]byte(event.Data), &ev); err != nil {
+		return s.Next()
 	}
-	if chunkData.EventType == "stream-end" {
-		return &provider.StreamChunk{Type: provider.ChunkTypeFinish, FinishReason: types.FinishReasonStop}, nil
+
+	switch ev.Type {
+	case "message-start":
+		return s.Next()
+
+	case "content-start":
+		var delta struct {
+			Message struct {
+				Content struct {
+					Type string `json:"type"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(ev.Delta, &delta); err == nil {
+			contentType := delta.Message.Content.Type
+			s.contentType[ev.Index] = contentType
+			if contentType == "thinking" {
+				s.isActiveReasoning = true
+				return &provider.StreamChunk{
+					Type: provider.ChunkTypeReasoningStart,
+					ID:   fmt.Sprintf("reasoning-%d", ev.Index),
+				}, nil
+			}
+		}
+		return s.Next()
+
+	case "content-delta":
+		ctype := s.contentType[ev.Index]
+		if ctype == "thinking" {
+			var delta struct {
+				Message struct {
+					Content struct {
+						Thinking string `json:"thinking"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal(ev.Delta, &delta); err == nil && delta.Message.Content.Thinking != "" {
+				return &provider.StreamChunk{
+					Type:      provider.ChunkTypeReasoning,
+					Reasoning: delta.Message.Content.Thinking,
+					ID:        fmt.Sprintf("reasoning-%d", ev.Index),
+				}, nil
+			}
+		} else {
+			var delta struct {
+				Message struct {
+					Content struct {
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal(ev.Delta, &delta); err == nil && delta.Message.Content.Text != "" {
+				return &provider.StreamChunk{
+					Type: provider.ChunkTypeText,
+					Text: delta.Message.Content.Text,
+				}, nil
+			}
+		}
+		return s.Next()
+
+	case "content-end":
+		ctype := s.contentType[ev.Index]
+		if ctype == "thinking" {
+			s.isActiveReasoning = false
+			return &provider.StreamChunk{
+				Type: provider.ChunkTypeReasoningEnd,
+				ID:   fmt.Sprintf("reasoning-%d", ev.Index),
+			}, nil
+		}
+		return s.Next()
+
+	case "tool-call-start":
+		var delta struct {
+			Message struct {
+				ToolCalls struct {
+					ID       string `json:"id"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(ev.Delta, &delta); err == nil {
+			id := delta.Message.ToolCalls.ID
+			s.pendingTools[id] = &cohereV2PendingTool{
+				id:        id,
+				name:      delta.Message.ToolCalls.Function.Name,
+				arguments: delta.Message.ToolCalls.Function.Arguments,
+			}
+		}
+		return s.Next()
+
+	case "tool-call-delta":
+		var delta struct {
+			Message struct {
+				ToolCalls struct {
+					Function struct {
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(ev.Delta, &delta); err == nil {
+			// Cohere v2 supports only one pending tool call at a time; append to it.
+			for _, tc := range s.pendingTools {
+				if !tc.finished {
+					tc.arguments += delta.Message.ToolCalls.Function.Arguments
+					break
+				}
+			}
+		}
+		return s.Next()
+
+	case "tool-call-end":
+		for id, tc := range s.pendingTools {
+			if !tc.finished {
+				tc.finished = true
+				var args map[string]interface{}
+				if tc.arguments != "" {
+					json.Unmarshal([]byte(tc.arguments), &args) //nolint:errcheck
+				}
+				delete(s.pendingTools, id)
+				return &provider.StreamChunk{
+					Type: provider.ChunkTypeToolCall,
+					ToolCall: &types.ToolCall{
+						ID:        tc.id,
+						ToolName:  tc.name,
+						Arguments: args,
+					},
+				}, nil
+			}
+		}
+		return s.Next()
+
+	case "message-end":
+		var delta struct {
+			FinishReason string `json:"finish_reason"`
+			Usage        struct {
+				Tokens struct {
+					InputTokens  int `json:"input_tokens"`
+					OutputTokens int `json:"output_tokens"`
+				} `json:"tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(ev.Delta, &delta); err == nil {
+			inputTokens := int64(delta.Usage.Tokens.InputTokens)
+			outputTokens := int64(delta.Usage.Tokens.OutputTokens)
+			totalTokens := inputTokens + outputTokens
+			usage := &types.Usage{
+				InputTokens:  &inputTokens,
+				OutputTokens: &outputTokens,
+				TotalTokens:  &totalTokens,
+			}
+			usage.InputDetails = &types.InputTokenDetails{NoCacheTokens: &inputTokens}
+			usage.OutputDetails = &types.OutputTokenDetails{TextTokens: &outputTokens}
+			return &provider.StreamChunk{
+				Type:         provider.ChunkTypeFinish,
+				FinishReason: mapCohereV2FinishReason(delta.FinishReason),
+				Usage:        usage,
+			}, nil
+		}
+		s.err = io.EOF
+		return nil, io.EOF
+
+	default:
+		// citation-start, citation-end, tool-plan-delta, etc. — ignore
+		return s.Next()
 	}
-	return s.Next()
-}
-func (s *cohereStream) Err() error {
-	if s.err == io.EOF {
-		return nil
-	}
-	return s.err
 }

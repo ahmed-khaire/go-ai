@@ -79,24 +79,30 @@ data: [DONE]
 		chunks = append(chunks, chunk)
 	}
 
-	// Should have: 2 reasoning + 1 text + 1 finish
-	require.Len(t, chunks, 4)
+	// Should have: reasoning-start + reasoning + reasoning + reasoning-end + text + finish
+	require.Len(t, chunks, 6)
+
+	// Reasoning start
+	assert.Equal(t, provider.ChunkTypeReasoningStart, chunks[0].Type)
 
 	// First reasoning chunk
-	assert.Equal(t, provider.ChunkTypeReasoning, chunks[0].Type)
-	assert.Equal(t, "Let me think...", chunks[0].Reasoning)
+	assert.Equal(t, provider.ChunkTypeReasoning, chunks[1].Type)
+	assert.Equal(t, "Let me think...", chunks[1].Reasoning)
 
 	// Second reasoning chunk
-	assert.Equal(t, provider.ChunkTypeReasoning, chunks[1].Type)
-	assert.Equal(t, " about this problem", chunks[1].Reasoning)
+	assert.Equal(t, provider.ChunkTypeReasoning, chunks[2].Type)
+	assert.Equal(t, " about this problem", chunks[2].Reasoning)
+
+	// Reasoning end + text (text arrives with finish, triggering reasoning-end transition)
+	assert.Equal(t, provider.ChunkTypeReasoningEnd, chunks[3].Type)
 
 	// Text chunk
-	assert.Equal(t, provider.ChunkTypeText, chunks[2].Type)
-	assert.Equal(t, "The answer is 42", chunks[2].Text)
+	assert.Equal(t, provider.ChunkTypeText, chunks[4].Type)
+	assert.Equal(t, "The answer is 42", chunks[4].Text)
 
 	// Finish chunk
-	assert.Equal(t, provider.ChunkTypeFinish, chunks[3].Type)
-	assert.Equal(t, types.FinishReasonStop, chunks[3].FinishReason)
+	assert.Equal(t, provider.ChunkTypeFinish, chunks[5].Type)
+	assert.Equal(t, types.FinishReasonStop, chunks[5].FinishReason)
 }
 
 // TestAlibabaStream_ProcessToolCallChunks tests tool call accumulation
@@ -402,17 +408,21 @@ data: [DONE]
 		chunks = append(chunks, chunk)
 	}
 
-	// Should have: reasoning + 2 text + finish
-	require.Len(t, chunks, 4)
+	// Should have: reasoning-start + reasoning + reasoning-end + 2 text + finish
+	require.Len(t, chunks, 6)
 
-	assert.Equal(t, provider.ChunkTypeReasoning, chunks[0].Type)
-	assert.Equal(t, "Thinking...", chunks[0].Reasoning)
+	assert.Equal(t, provider.ChunkTypeReasoningStart, chunks[0].Type)
 
-	assert.Equal(t, provider.ChunkTypeText, chunks[1].Type)
-	assert.Equal(t, "Answer: ", chunks[1].Text)
+	assert.Equal(t, provider.ChunkTypeReasoning, chunks[1].Type)
+	assert.Equal(t, "Thinking...", chunks[1].Reasoning)
 
-	assert.Equal(t, provider.ChunkTypeText, chunks[2].Type)
-	assert.Equal(t, "42", chunks[2].Text)
+	assert.Equal(t, provider.ChunkTypeReasoningEnd, chunks[2].Type)
 
-	assert.Equal(t, provider.ChunkTypeFinish, chunks[3].Type)
+	assert.Equal(t, provider.ChunkTypeText, chunks[3].Type)
+	assert.Equal(t, "Answer: ", chunks[3].Text)
+
+	assert.Equal(t, provider.ChunkTypeText, chunks[4].Type)
+	assert.Equal(t, "42", chunks[4].Text)
+
+	assert.Equal(t, provider.ChunkTypeFinish, chunks[5].Type)
 }

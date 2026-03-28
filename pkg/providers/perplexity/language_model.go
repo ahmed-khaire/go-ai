@@ -60,17 +60,33 @@ func (m *LanguageModel) SupportsImageInput() bool {
 
 // DoGenerate performs non-streaming text generation
 func (m *LanguageModel) DoGenerate(ctx context.Context, opts *provider.GenerateOptions) (*types.GenerateResult, error) {
+	var warnings []types.Warning
+	if opts.Reasoning != nil {
+		warnings = append(warnings, types.Warning{
+			Type:    "unsupported-setting",
+			Message: "Perplexity does not support reasoning",
+		})
+	}
 	reqBody := m.buildRequestBody(opts, false)
 	var response perplexityResponse
 	err := m.provider.client.PostJSON(ctx, "/chat/completions", reqBody, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
-	return m.convertResponse(response), nil
+	result := m.convertResponse(response)
+	result.Warnings = append(warnings, result.Warnings...)
+	return result, nil
 }
 
 // DoStream performs streaming text generation
 func (m *LanguageModel) DoStream(ctx context.Context, opts *provider.GenerateOptions) (provider.TextStream, error) {
+	var warnings []types.Warning
+	if opts.Reasoning != nil {
+		warnings = append(warnings, types.Warning{
+			Type:    "unsupported-setting",
+			Message: "Perplexity does not support reasoning",
+		})
+	}
 	reqBody := m.buildRequestBody(opts, true)
 	httpResp, err := m.provider.client.DoStream(ctx, internalhttp.Request{
 		Method: http.MethodPost,
@@ -83,7 +99,8 @@ func (m *LanguageModel) DoStream(ctx context.Context, opts *provider.GenerateOpt
 	if err != nil {
 		return nil, m.handleError(err)
 	}
-	return newPerplexityStream(httpResp.Body), nil
+	inner := newPerplexityStream(httpResp.Body)
+	return streaming.NewWarningsStream(inner, warnings), nil
 }
 
 func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream bool) map[string]interface{} {
