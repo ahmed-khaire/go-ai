@@ -198,7 +198,7 @@ func TestToGoogleMessagesCustomContentWithOptions(t *testing.T) {
 		},
 	}
 
-	result := ToGoogleMessages(msgs)
+	result := ToGoogleMessages(msgs, false)
 	if len(result) != 1 {
 		t.Fatalf("len(result) = %d, want 1", len(result))
 	}
@@ -230,7 +230,7 @@ func TestCustomContentNilProviderOptionsNoCrash(t *testing.T) {
 	// None of these should panic.
 	_ = ToAnthropicMessages(msgs)
 	_ = ToOpenAIMessages(msgs)
-	_ = ToGoogleMessages(msgs)
+	_ = ToGoogleMessages(msgs, false)
 }
 
 // TestCustomContentProviderMetadataNotForwarded verifies that ProviderMetadata
@@ -267,5 +267,301 @@ func TestCustomContentProviderMetadataNotForwarded(t *testing.T) {
 		}
 	default:
 		_ = c
+	}
+}
+
+// --- ToGoogleMessages tool result and functionCall tests --------------------
+
+// TestToGoogleMessagesSimpleToolResult verifies that a basic ToolResultContent
+// (no Output) is serialized as a functionResponse with response.content.
+func TestToGoogleMessagesSimpleToolResult(t *testing.T) {
+	msgs := []types.Message{
+		{Role: types.RoleTool, Content: []types.ContentPart{
+			types.ToolResultContent{
+				ToolCallID: "c1",
+				ToolName:   "calculator",
+				Result:     "42",
+			},
+		}},
+	}
+
+	result := ToGoogleMessages(msgs, false)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0]["role"] != "user" {
+		t.Errorf("role = %v, want user", result[0]["role"])
+	}
+	parts := result[0]["parts"].([]map[string]interface{})
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+	fr := parts[0]["functionResponse"].(map[string]interface{})
+	if fr["name"] != "calculator" {
+		t.Errorf("name = %v, want calculator", fr["name"])
+	}
+	resp := fr["response"].(map[string]interface{})
+	if resp["content"] != "42" {
+		t.Errorf("content = %v, want 42", resp["content"])
+	}
+}
+
+// TestToGoogleMessagesMultimodalToolResultGemini3 verifies that with
+// supportsFunctionResponseParts=true, image blocks land in
+// functionResponse.parts[].inlineData.
+func TestToGoogleMessagesMultimodalToolResultGemini3(t *testing.T) {
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	msgs := []types.Message{
+		{Role: types.RoleTool, Content: []types.ContentPart{
+			types.ToolResultContent{
+				ToolCallID: "c1",
+				ToolName:   "screenshot",
+				Output: &types.ToolResultOutput{
+					Type: types.ToolResultOutputContent,
+					Content: []types.ToolResultContentBlock{
+						types.TextContentBlock{Text: "screenshot taken"},
+						types.ImageContentBlock{Data: imageBytes, MediaType: "image/png"},
+					},
+				},
+			},
+		}},
+	}
+
+	result := ToGoogleMessages(msgs, true) // Gemini 3+
+	parts := result[0]["parts"].([]map[string]interface{})
+	fr := parts[0]["functionResponse"].(map[string]interface{})
+
+	// Text goes into response.content.
+	resp := fr["response"].(map[string]interface{})
+	if resp["content"] != "screenshot taken" {
+		t.Errorf("response.content = %v, want %q", resp["content"], "screenshot taken")
+	}
+
+	// Image goes into functionResponse.parts[].inlineData.
+	frParts, ok := fr["parts"].([]map[string]interface{})
+	if !ok || len(frParts) == 0 {
+		t.Fatalf("functionResponse.parts missing; got %v", fr["parts"])
+	}
+	inlineData := frParts[0]["inlineData"].(map[string]interface{})
+	if inlineData["mimeType"] != "image/png" {
+		t.Errorf("mimeType = %v, want image/png", inlineData["mimeType"])
+	}
+}
+
+// TestToGoogleMessagesMultimodalToolResultLegacy verifies that with
+// supportsFunctionResponseParts=false, images become top-level inlineData parts.
+func TestToGoogleMessagesMultimodalToolResultLegacy(t *testing.T) {
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	msgs := []types.Message{
+		{Role: types.RoleTool, Content: []types.ContentPart{
+			types.ToolResultContent{
+				ToolCallID: "c1",
+				ToolName:   "screenshot",
+				Output: &types.ToolResultOutput{
+					Type: types.ToolResultOutputContent,
+					Content: []types.ToolResultContentBlock{
+						types.ImageContentBlock{Data: imageBytes, MediaType: "image/jpeg"},
+					},
+				},
+			},
+		}},
+	}
+
+	result := ToGoogleMessages(msgs, false) // Gemini 2 legacy
+	parts := result[0]["parts"].([]map[string]interface{})
+
+	var hasInlineData bool
+	for _, pt := range parts {
+		if _, ok := pt["inlineData"]; ok {
+			hasInlineData = true
+		}
+		if fr, ok := pt["functionResponse"].(map[string]interface{}); ok {
+			if _, hasParts := fr["parts"]; hasParts {
+				t.Error("legacy mode must NOT use functionResponse.parts[]")
+			}
+		}
+	}
+	if !hasInlineData {
+		t.Error("legacy mode must emit a top-level inlineData part for images")
+	}
+}
+
+// TestToGoogleMessagesReasoningContent verifies that ReasoningContent parts are
+// emitted as thought=true parts with thoughtSignature.
+func TestToGoogleMessagesReasoningContent(t *testing.T) {
+	msgs := []types.Message{
+		{
+			Role: types.RoleAssistant,
+			Content: []types.ContentPart{
+				types.ReasoningContent{Text: "I need to think about this.", Signature: "sealed-sig-abc"},
+				types.TextContent{Text: "Here is my answer."},
+			},
+		},
+	}
+
+	result := ToGoogleMessages(msgs, false)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	parts := result[0]["parts"].([]map[string]interface{})
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+
+	// First part: thought
+	thoughtPart := parts[0]
+	if thoughtPart["thought"] != true {
+		t.Errorf("thought = %v, want true", thoughtPart["thought"])
+	}
+	if thoughtPart["text"] != "I need to think about this." {
+		t.Errorf("text = %v, want 'I need to think about this.'", thoughtPart["text"])
+	}
+	if thoughtPart["thoughtSignature"] != "sealed-sig-abc" {
+		t.Errorf("thoughtSignature = %v, want 'sealed-sig-abc'", thoughtPart["thoughtSignature"])
+	}
+
+	// Second part: regular text
+	textPart := parts[1]
+	if textPart["text"] != "Here is my answer." {
+		t.Errorf("text = %v, want 'Here is my answer.'", textPart["text"])
+	}
+	if _, exists := textPart["thought"]; exists {
+		t.Error("regular text part must not have 'thought' field")
+	}
+}
+
+// TestToGoogleMessagesThoughtSignatureOnFunctionCall verifies that ToolCall.ThoughtSignature
+// is emitted as a top-level thoughtSignature field on the functionCall part.
+func TestToGoogleMessagesThoughtSignatureOnFunctionCall(t *testing.T) {
+	msgs := []types.Message{
+		{
+			Role: types.RoleAssistant,
+			ToolCalls: []types.ToolCall{
+				{
+					ID:               "c1",
+					ToolName:         "search",
+					Arguments:        map[string]interface{}{"q": "test"},
+					ThoughtSignature: "fc-sig-xyz",
+				},
+			},
+		},
+	}
+
+	result := ToGoogleMessages(msgs, false)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	parts := result[0]["parts"].([]map[string]interface{})
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+
+	if parts[0]["thoughtSignature"] != "fc-sig-xyz" {
+		t.Errorf("thoughtSignature = %v, want 'fc-sig-xyz'", parts[0]["thoughtSignature"])
+	}
+	// functionCall must still be present
+	if _, ok := parts[0]["functionCall"]; !ok {
+		t.Error("functionCall field must be present on the part")
+	}
+}
+
+// TestToGoogleMessagesExecutionDeniedToolResult verifies that an execution-denied
+// tool result is sent as a clear denial message to the model.
+func TestToGoogleMessagesExecutionDeniedToolResult(t *testing.T) {
+	msgs := []types.Message{
+		{
+			Role: types.RoleTool,
+			Content: []types.ContentPart{
+				types.ToolResultContent{
+					ToolCallID: "c1",
+					ToolName:   "run_code",
+					Output: &types.ToolResultOutput{
+						Type:   types.ToolResultOutputExecutionDenied,
+						Reason: "User rejected the tool call",
+					},
+				},
+			},
+		},
+	}
+
+	result := ToGoogleMessages(msgs, false)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	parts := result[0]["parts"].([]map[string]interface{})
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+
+	fr := parts[0]["functionResponse"].(map[string]interface{})
+	resp := fr["response"].(map[string]interface{})
+	content, _ := resp["content"].(string)
+	// TS SDK: content = output.reason ?? 'Tool execution denied.' — no prefix added
+	if content != "User rejected the tool call" {
+		t.Errorf("denial content = %q, want %q", content, "User rejected the tool call")
+	}
+}
+
+// TestToGoogleMessagesExecutionDeniedNoReason verifies execution-denied with no reason
+// uses a sensible fallback message.
+func TestToGoogleMessagesExecutionDeniedNoReason(t *testing.T) {
+	msgs := []types.Message{
+		{
+			Role: types.RoleTool,
+			Content: []types.ContentPart{
+				types.ToolResultContent{
+					ToolCallID: "c1",
+					ToolName:   "run_code",
+					Output: &types.ToolResultOutput{
+						Type: types.ToolResultOutputExecutionDenied,
+					},
+				},
+			},
+		},
+	}
+
+	result := ToGoogleMessages(msgs, false)
+	parts := result[0]["parts"].([]map[string]interface{})
+	fr := parts[0]["functionResponse"].(map[string]interface{})
+	resp := fr["response"].(map[string]interface{})
+	content, _ := resp["content"].(string)
+	if content != "Tool execution denied." {
+		t.Errorf("denial content = %q, want %q", content, "Tool execution denied.")
+	}
+}
+
+// TestToGoogleMessagesAssistantFunctionCall verifies that msg.ToolCalls on an
+// assistant message are emitted as functionCall parts in the "model" turn.
+func TestToGoogleMessagesAssistantFunctionCall(t *testing.T) {
+	msgs := []types.Message{
+		{
+			Role: types.RoleAssistant,
+			ToolCalls: []types.ToolCall{
+				{ID: "c1", ToolName: "search", Arguments: map[string]interface{}{"q": "go generics"}},
+			},
+		},
+	}
+
+	result := ToGoogleMessages(msgs, false)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0]["role"] != "model" {
+		t.Errorf("role = %v, want model", result[0]["role"])
+	}
+	parts := result[0]["parts"].([]map[string]interface{})
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+	fc := parts[0]["functionCall"].(map[string]interface{})
+	if fc["name"] != "search" {
+		t.Errorf("name = %v, want search", fc["name"])
+	}
+	args := fc["args"].(map[string]interface{})
+	if args["q"] != "go generics" {
+		t.Errorf("args[q] = %v, want go generics", args["q"])
 	}
 }

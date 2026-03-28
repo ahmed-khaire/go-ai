@@ -3,9 +3,11 @@ package googlevertex
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/digitallysavvy/go-ai/pkg/provider"
@@ -30,14 +32,7 @@ func TestLanguageModel_GenerateText_MockServer(t *testing.T) {
 
 		// Return mock response
 		response := vertexResponse{
-			Candidates: []struct {
-				Content struct {
-					Parts []vertexPart `json:"parts"`
-					Role  string       `json:"role"`
-				} `json:"content"`
-				FinishReason string `json:"finishReason"`
-				Index        int    `json:"index"`
-			}{
+			Candidates: []vertexCandidate{
 				{
 					Content: struct {
 						Parts []vertexPart `json:"parts"`
@@ -126,14 +121,7 @@ func TestLanguageModel_GenerateWithTools_MockServer(t *testing.T) {
 
 		// Return mock response with function call
 		response := vertexResponse{
-			Candidates: []struct {
-				Content struct {
-					Parts []vertexPart `json:"parts"`
-					Role  string       `json:"role"`
-				} `json:"content"`
-				FinishReason string `json:"finishReason"`
-				Index        int    `json:"index"`
-			}{
+			Candidates: []vertexCandidate{
 				{
 					Content: struct {
 						Parts []vertexPart `json:"parts"`
@@ -248,14 +236,7 @@ func TestLanguageModel_JSONMode_MockServer(t *testing.T) {
 
 		// Return mock JSON response
 		response := vertexResponse{
-			Candidates: []struct {
-				Content struct {
-					Parts []vertexPart `json:"parts"`
-					Role  string       `json:"role"`
-				} `json:"content"`
-				FinishReason string `json:"finishReason"`
-				Index        int    `json:"index"`
-			}{
+			Candidates: []vertexCandidate{
 				{
 					Content: struct {
 						Parts []vertexPart `json:"parts"`
@@ -336,14 +317,7 @@ func TestLanguageModel_UsageTracking(t *testing.T) {
 	// Create test server with detailed usage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := vertexResponse{
-			Candidates: []struct {
-				Content struct {
-					Parts []vertexPart `json:"parts"`
-					Role  string       `json:"role"`
-				} `json:"content"`
-				FinishReason string `json:"finishReason"`
-				Index        int    `json:"index"`
-			}{
+			Candidates: []vertexCandidate{
 				{
 					Content: struct {
 						Parts []vertexPart `json:"parts"`
@@ -438,6 +412,189 @@ func TestLanguageModel_UsageTracking(t *testing.T) {
 	}
 	if result.Usage.OutputDetails.ReasoningTokens == nil || *result.Usage.OutputDetails.ReasoningTokens != 10 {
 		t.Errorf("Expected reasoning tokens 10, got %v", result.Usage.OutputDetails.ReasoningTokens)
+	}
+}
+
+// --- VALIDATED mode (strict tools) ------------------------------------------
+
+func TestVertexStrictToolsUsesValidatedMode(t *testing.T) {
+	prov, err := New(Config{
+		Project:     "test-project",
+		Location:    "us-central1",
+		AccessToken: "test-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := prov.LanguageModel("gemini-2.0-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm := model.(*LanguageModel)
+
+	body := lm.buildRequestBody(&provider.GenerateOptions{
+		Prompt: types.Prompt{Messages: []types.Message{
+			{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "hi"}}},
+		}},
+		Tools: []types.Tool{
+			{
+				Name:       "search",
+				Strict:     true,
+				Parameters: map[string]interface{}{"type": "object"},
+			},
+		},
+	})
+
+	toolConfig, ok := body["toolConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatal("toolConfig must be present when any tool has Strict:true")
+	}
+	fcc, ok := toolConfig["functionCallingConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatal("functionCallingConfig must be present")
+	}
+	if fcc["mode"] != "VALIDATED" {
+		t.Errorf("mode = %v, want VALIDATED", fcc["mode"])
+	}
+}
+
+// --- Google native Vertex tools ---------------------------------------------
+
+func TestVertexGoogleSearchTool(t *testing.T) {
+	prov, err := New(Config{
+		Project:     "test-project",
+		Location:    "us-central1",
+		AccessToken: "test-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := prov.LanguageModel("gemini-2.0-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm := model.(*LanguageModel)
+
+	searchTool := GoogleSearchTool()
+	body := lm.buildRequestBody(&provider.GenerateOptions{
+		Prompt: types.Prompt{Messages: []types.Message{
+			{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "search"}}},
+		}},
+		Tools: []types.Tool{searchTool},
+	})
+
+	tools, ok := body["tools"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("tools = %T, want []map[string]interface{}", body["tools"])
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	if _, hasGS := tools[0]["googleSearch"]; !hasGS {
+		t.Errorf("tool entry must contain googleSearch, got %v", tools[0])
+	}
+}
+
+func TestVertexUrlContextTool(t *testing.T) {
+	prov, err := New(Config{
+		Project:     "test-project",
+		Location:    "us-central1",
+		AccessToken: "test-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := prov.LanguageModel("gemini-2.0-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm := model.(*LanguageModel)
+
+	urlTool := UrlContextTool()
+	body := lm.buildRequestBody(&provider.GenerateOptions{
+		Prompt: types.Prompt{Messages: []types.Message{
+			{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "fetch"}}},
+		}},
+		Tools: []types.Tool{urlTool},
+	})
+
+	tools, ok := body["tools"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("tools = %T, want []map[string]interface{}", body["tools"])
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	if _, hasUC := tools[0]["urlContext"]; !hasUC {
+		t.Errorf("tool entry must contain urlContext, got %v", tools[0])
+	}
+}
+
+// --- finishMessage in providerMetadata --------------------------------------
+
+func TestGoogleVertexFinishMessageInMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Vertex response with finishMessage.
+		resp := map[string]interface{}{
+			"candidates": []map[string]interface{}{
+				{
+					"content": map[string]interface{}{
+						"parts": []map[string]interface{}{{"text": "Hello"}},
+						"role":  "model",
+					},
+					"finishReason":  "STOP",
+					"finishMessage": "safety filter triggered",
+				},
+			},
+			"usageMetadata": map[string]interface{}{
+				"promptTokenCount":     5,
+				"candidatesTokenCount": 1,
+				"totalTokenCount":      6,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	prov, err := New(Config{
+		Project:     "test-project",
+		Location:    "us-central1",
+		AccessToken: "test-token",
+		BaseURL:     server.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	model, err := prov.LanguageModel("gemini-2.0-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := model.DoGenerate(context.Background(), &provider.GenerateOptions{
+		Prompt: types.Prompt{Messages: []types.Message{
+			{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "hi"}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+
+	if result.ProviderMetadata == nil {
+		t.Fatal("ProviderMetadata must be set when finishMessage is present")
+	}
+	rawMeta, ok := result.ProviderMetadata["vertex"].(map[string]json.RawMessage)
+	if !ok {
+		t.Fatalf("ProviderMetadata[vertex] type = %T, want map[string]json.RawMessage",
+			result.ProviderMetadata["vertex"])
+	}
+	var finishMessage string
+	if err := json.Unmarshal(rawMeta["finishMessage"], &finishMessage); err != nil {
+		t.Fatalf("unmarshal finishMessage: %v", err)
+	}
+	if finishMessage != "safety filter triggered" {
+		t.Errorf("finishMessage = %v, want %q", finishMessage, "safety filter triggered")
 	}
 }
 
@@ -557,4 +714,299 @@ func TestVertexLanguageModel_StreamText_Integration(t *testing.T) {
 	if len(chunks) == 0 {
 		t.Error("Expected at least one text chunk")
 	}
+}
+
+// --- Gemini 3 thinkingLevel for Vertex -------------------------------------
+
+func TestVertexGemini3ReasoningUsesThinkingLevel(t *testing.T) {
+	prov, err := New(Config{Project: "p", Location: "us-central1", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm, err := prov.LanguageModel(ModelGemini3ProPreview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := lm.(*LanguageModel)
+
+	level := types.ReasoningHigh
+	body := m.buildRequestBody(&provider.GenerateOptions{
+		Prompt:    types.Prompt{Text: "think"},
+		Reasoning: &level,
+	})
+
+	gc, ok := body["generationConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("generationConfig missing: %T", body["generationConfig"])
+	}
+	tc, ok := gc["thinkingConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("thinkingConfig missing: %T", gc["thinkingConfig"])
+	}
+	if _, hasBudget := tc["thinkingBudget"]; hasBudget {
+		t.Error("Gemini 3 on Vertex must use thinkingLevel, not thinkingBudget")
+	}
+	if tl, _ := tc["thinkingLevel"].(string); tl != "high" {
+		t.Errorf("thinkingLevel = %q, want %q", tl, "high")
+	}
+}
+
+func TestVertexGemini3ReasoningNoneMapsToMinimal(t *testing.T) {
+	prov, err := New(Config{Project: "p", Location: "us-central1", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm, err := prov.LanguageModel(ModelGemini3ProPreview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := lm.(*LanguageModel)
+
+	level := types.ReasoningNone
+	body := m.buildRequestBody(&provider.GenerateOptions{
+		Prompt:    types.Prompt{Text: "no think"},
+		Reasoning: &level,
+	})
+
+	gc := body["generationConfig"].(map[string]interface{})
+	tc := gc["thinkingConfig"].(map[string]interface{})
+	if tl, _ := tc["thinkingLevel"].(string); tl != "minimal" {
+		t.Errorf("ReasoningNone on Gemini 3 must map to 'minimal', got %q", tl)
+	}
+}
+
+// --- supportsFunctionResponseParts on Vertex --------------------------------
+
+func TestVertexSupportsFunctionResponseParts_Gemini3(t *testing.T) {
+	prov, err := New(Config{Project: "p", Location: "us-central1", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm, err := prov.LanguageModel(ModelGemini3ProPreview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := lm.(*LanguageModel)
+	if !m.supportsFunctionResponseParts() {
+		t.Error("Gemini 3 on Vertex must support function response parts")
+	}
+}
+
+func TestVertexSupportsFunctionResponseParts_Gemini2(t *testing.T) {
+	prov, err := New(Config{Project: "p", Location: "us-central1", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm, err := prov.LanguageModel(ModelGemini20Flash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := lm.(*LanguageModel)
+	if m.supportsFunctionResponseParts() {
+		t.Error("Gemini 2 on Vertex must NOT support function response parts")
+	}
+}
+
+// --- Vertex streaming finishMessage in ProviderMetadata ---------------------
+
+func TestVertexStreamingFinishMessageInProviderMetadata(t *testing.T) {
+	// SSE response: one text chunk + a finish chunk with finishMessage
+	ssePayload := "data: " + mustVertexMarshal(map[string]interface{}{
+		"candidates": []map[string]interface{}{
+			{
+				"content": map[string]interface{}{
+					"parts": []map[string]interface{}{{"text": "hello"}},
+					"role":  "model",
+				},
+			},
+		},
+	}) + "\n\n" +
+		"data: " + mustVertexMarshal(map[string]interface{}{
+		"candidates": []map[string]interface{}{
+			{
+				"content":       map[string]interface{}{"parts": []interface{}{}, "role": "model"},
+				"finishReason":  "STOP",
+				"finishMessage": "done with safety",
+			},
+		},
+	}) + "\n\n" +
+		"data: [DONE]\n\n"
+
+	stream := newVertexStream(io.NopCloser(strings.NewReader(ssePayload)))
+
+	var finishChunk *provider.StreamChunk
+	for {
+		chunk, err := stream.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("stream error: %v", err)
+		}
+		if chunk.Type == provider.ChunkTypeFinish {
+			finishChunk = chunk
+		}
+	}
+
+	if finishChunk == nil {
+		t.Fatal("expected a ChunkTypeFinish chunk")
+	}
+	if finishChunk.ProviderMetadata == nil {
+		t.Fatal("ChunkTypeFinish must have ProviderMetadata when finishMessage is set")
+	}
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(finishChunk.ProviderMetadata, &meta); err != nil {
+		t.Fatalf("unmarshal ProviderMetadata: %v", err)
+	}
+	var vertexMeta map[string]interface{}
+	if err := json.Unmarshal(meta["vertex"], &vertexMeta); err != nil {
+		t.Fatalf("unmarshal vertex: %v", err)
+	}
+	if vertexMeta["finishMessage"] != "done with safety" {
+		t.Errorf("finishMessage = %v, want %q", vertexMeta["finishMessage"], "done with safety")
+	}
+}
+
+// --- Vertex streaming STOP emits finish chunk -------------------------------
+
+func TestVertexStreamingSTOPEmitsFinishChunk(t *testing.T) {
+	ssePayload := "data: " + mustVertexMarshal(map[string]interface{}{
+		"candidates": []map[string]interface{}{
+			{
+				"content": map[string]interface{}{
+					"parts": []map[string]interface{}{{"text": "response"}},
+					"role":  "model",
+				},
+				"finishReason": "STOP",
+			},
+		},
+	}) + "\n\n" +
+		"data: [DONE]\n\n"
+
+	stream := newVertexStream(io.NopCloser(strings.NewReader(ssePayload)))
+
+	var finishFound bool
+	for {
+		chunk, err := stream.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("stream error: %v", err)
+		}
+		if chunk.Type == provider.ChunkTypeFinish && chunk.FinishReason == types.FinishReasonStop {
+			finishFound = true
+		}
+	}
+
+	if !finishFound {
+		t.Error("STOP finish reason must emit a ChunkTypeFinish chunk")
+	}
+}
+
+// TestVertexGemini3ImageModelDoesNotGetThinkingLevel verifies that Gemini 3
+// image models are excluded from thinkingLevel on Vertex.
+func TestVertexGemini3ImageModelDoesNotGetThinkingLevel(t *testing.T) {
+	prov, err := New(Config{Project: "p", Location: "us-central1", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, modelID := range []string{ModelGemini3ProImagePreview, ModelGemini31FlashImagePreview} {
+		lm, err := prov.LanguageModel(modelID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := lm.(*LanguageModel)
+		level := types.ReasoningHigh
+		body := m.buildRequestBody(&provider.GenerateOptions{
+			Prompt:    types.Prompt{Text: "describe"},
+			Reasoning: &level,
+		})
+		gc, ok := body["generationConfig"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tc, hasTc := gc["thinkingConfig"].(map[string]interface{})
+		if !hasTc {
+			continue
+		}
+		if _, hasLevel := tc["thinkingLevel"]; hasLevel {
+			t.Errorf("model %q must NOT use thinkingLevel (image model)", modelID)
+		}
+	}
+}
+
+// TestVertexProviderOptionsThinkingConfigFallback verifies that when Reasoning
+// is unset, Vertex falls back to ProviderOptions thinkingConfig.
+func TestVertexProviderOptionsThinkingConfigFallback(t *testing.T) {
+	prov, err := New(Config{Project: "p", Location: "us-central1", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm, err := prov.LanguageModel(ModelGemini25Flash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := lm.(*LanguageModel)
+
+	body := m.buildRequestBody(&provider.GenerateOptions{
+		Prompt: types.Prompt{Text: "think"},
+		ProviderOptions: map[string]interface{}{
+			"vertex": map[string]interface{}{
+				"thinkingConfig": map[string]interface{}{"thinkingBudget": 1024},
+			},
+		},
+	})
+
+	gc, ok := body["generationConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("generationConfig missing: %T", body["generationConfig"])
+	}
+	tc, ok := gc["thinkingConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("thinkingConfig missing: %T", gc["thinkingConfig"])
+	}
+	if tc["thinkingBudget"] != 1024 {
+		t.Errorf("thinkingBudget = %v, want 1024", tc["thinkingBudget"])
+	}
+}
+
+// TestVertexProviderOptionsGoogleKeyFallback verifies "google" key is also
+// accepted as a fallback for ProviderOptions thinkingConfig.
+func TestVertexProviderOptionsGoogleKeyFallback(t *testing.T) {
+	prov, err := New(Config{Project: "p", Location: "us-central1", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm, err := prov.LanguageModel(ModelGemini25Pro)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := lm.(*LanguageModel)
+
+	body := m.buildRequestBody(&provider.GenerateOptions{
+		Prompt: types.Prompt{Text: "think"},
+		ProviderOptions: map[string]interface{}{
+			"google": map[string]interface{}{
+				"thinkingConfig": map[string]interface{}{"thinkingBudget": 512},
+			},
+		},
+	})
+
+	gc := body["generationConfig"].(map[string]interface{})
+	tc, ok := gc["thinkingConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("thinkingConfig missing via google key fallback")
+	}
+	if tc["thinkingBudget"] != 512 {
+		t.Errorf("thinkingBudget = %v, want 512", tc["thinkingBudget"])
+	}
+}
+
+func mustVertexMarshal(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }

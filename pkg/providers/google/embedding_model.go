@@ -2,11 +2,44 @@ package google
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
+
+// EmbeddingPart is implemented by TextEmbeddingPart and ImageEmbeddingPart.
+// The unexported marker method seals the interface within this package.
+type EmbeddingPart interface {
+	embeddingPart()
+}
+
+// TextEmbeddingPart is a text part for multimodal embedding.
+type TextEmbeddingPart struct {
+	Text string
+}
+
+func (TextEmbeddingPart) embeddingPart() {}
+
+// ImageEmbeddingPart is an image part for multimodal embedding.
+type ImageEmbeddingPart struct {
+	// MimeType is the MIME type of the image (e.g., "image/jpeg").
+	MimeType string
+	// Data is the raw image bytes.
+	Data []byte
+}
+
+func (ImageEmbeddingPart) embeddingPart() {}
+
+// GoogleEmbeddingProviderOptions contains Google-specific options for embedding.
+type GoogleEmbeddingProviderOptions struct {
+	// Parts provides additional multimodal content parts alongside the text input.
+	// Each element corresponds to a single embedding value and is appended to that
+	// value's content.parts in the API request.
+	Parts []EmbeddingPart
+}
 
 // EmbeddingModel implements the provider.EmbeddingModel interface for Google
 type EmbeddingModel struct {
@@ -49,7 +82,7 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	// Build request body
 	reqBody := map[string]interface{}{
 		"model": fmt.Sprintf("models/%s", m.modelID),
@@ -87,7 +120,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	if len(inputs) == 0 {
 		return &types.EmbeddingsResult{
 			Embeddings: [][]float64{},
@@ -99,7 +132,7 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 	// TODO: Optimize with concurrent requests
 	embeddings := make([][]float64, len(inputs))
 	for i, input := range inputs {
-		result, err := m.DoEmbed(ctx, input)
+		result, err := m.DoEmbed(ctx, input, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to embed input %d: %w", i, err)
 		}
@@ -114,6 +147,59 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 			TotalTokens: 0,
 		},
 	}, nil
+}
+
+// DoEmbedParts performs embedding for a single input with optional multimodal parts.
+// The text parameter provides the primary text content; parts provides additional
+// content (e.g. an image) to embed alongside it.
+func (m *EmbeddingModel) DoEmbedParts(ctx context.Context, text string, parts []EmbeddingPart) (*types.EmbeddingResult, error) {
+	apiParts := buildEmbeddingAPIParts(text, parts)
+
+	reqBody := map[string]interface{}{
+		"model": fmt.Sprintf("models/%s", m.modelID),
+		"content": map[string]interface{}{
+			"parts": apiParts,
+		},
+	}
+
+	path := fmt.Sprintf("/v1beta/models/%s:embedContent?key=%s", m.modelID, m.provider.APIKey())
+
+	var response googleEmbeddingResponse
+	err := m.provider.client.PostJSON(ctx, path, reqBody, &response)
+	if err != nil {
+		return nil, m.handleError(err)
+	}
+
+	if response.Embedding == nil || len(response.Embedding.Values) == 0 {
+		return nil, fmt.Errorf("no embedding data in response")
+	}
+
+	return &types.EmbeddingResult{
+		Embedding: response.Embedding.Values,
+		Usage:     types.EmbeddingUsage{},
+	}, nil
+}
+
+// buildEmbeddingAPIParts converts a text string plus optional EmbeddingParts to the
+// list of content.parts expected by the Google embedContent API.
+func buildEmbeddingAPIParts(text string, parts []EmbeddingPart) []map[string]interface{} {
+	apiParts := []map[string]interface{}{
+		{"text": text},
+	}
+	for _, p := range parts {
+		switch v := p.(type) {
+		case TextEmbeddingPart:
+			apiParts = append(apiParts, map[string]interface{}{"text": v.Text})
+		case ImageEmbeddingPart:
+			apiParts = append(apiParts, map[string]interface{}{
+				"inlineData": map[string]interface{}{
+					"mimeType": v.MimeType,
+					"data":     base64.StdEncoding.EncodeToString(v.Data),
+				},
+			})
+		}
+	}
+	return apiParts
 }
 
 // handleError converts various errors to provider errors
