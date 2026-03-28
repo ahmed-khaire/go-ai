@@ -641,16 +641,62 @@ func (m *LanguageModel) combineBetaHeaders(opts *provider.GenerateOptions, strea
 		}
 	}
 
-	// Detect code execution tool and inject its required beta header
 	if opts != nil {
+		// Collect which beta headers are needed based on the tool list.
+		needed := map[string]bool{}
+
 		for _, t := range opts.Tools {
-			if t.Name == codeExecution20260120ToolName {
-				if base != "" {
-					base += "," + BetaHeaderCodeExecution
-				} else {
-					base = BetaHeaderCodeExecution
+			switch t.Name {
+			case codeExecution20260120ToolName:
+				needed[BetaHeaderCodeExecution] = true
+			case codeExecution20250825ToolName:
+				needed[BetaHeaderCodeExecution20250825] = true
+			case "anthropic.code_execution_20250522":
+				needed[BetaHeaderCodeExecution20250522] = true
+			case "anthropic.web_search_20260209", "anthropic.web_fetch_20260209":
+				needed[BetaHeaderWebTools20260209] = true
+			case "anthropic.web_fetch_20250910":
+				needed[BetaHeaderWebFetch20250910] = true
+			case "anthropic.bash_20241022", "anthropic.computer_20241022", "anthropic.text_editor_20241022":
+				needed[BetaHeaderComputerUse20241022] = true
+			case "anthropic.bash_20250124", "anthropic.computer_20250124",
+				"anthropic.text_editor_20250124", "anthropic.text_editor_20250429":
+				needed[BetaHeaderComputerUse20250124] = true
+			case "anthropic.computer_20251124":
+				needed[BetaHeaderComputerUse20251124] = true
+			case "anthropic.memory_20250818":
+				needed[BetaHeaderContextManagement] = true
+			}
+			// advanced-tool-use: AllowedCallers or InputExamples on any tool
+			if !needed[BetaHeaderAdvancedToolUse] {
+				if toolOpts, ok := t.ProviderOptions.(*ToolOptions); ok && len(toolOpts.AllowedCallers) > 0 {
+					needed[BetaHeaderAdvancedToolUse] = true
 				}
-				break
+				if len(t.InputExamples) > 0 {
+					needed[BetaHeaderAdvancedToolUse] = true
+				}
+			}
+		}
+
+		// Inject in a stable order so the header value is deterministic.
+		for _, h := range []string{
+			BetaHeaderCodeExecution,
+			BetaHeaderCodeExecution20250522,
+			BetaHeaderCodeExecution20250825,
+			BetaHeaderWebTools20260209,
+			BetaHeaderWebFetch20250910,
+			BetaHeaderComputerUse20241022,
+			BetaHeaderComputerUse20250124,
+			BetaHeaderComputerUse20251124,
+			BetaHeaderContextManagement,
+			BetaHeaderAdvancedToolUse,
+		} {
+			if needed[h] {
+				if base != "" {
+					base += "," + h
+				} else {
+					base = h
+				}
 			}
 		}
 	}
@@ -851,6 +897,10 @@ type streamContentBlock struct {
 	providerToolName string          // original Anthropic provider name (e.g. "bash_code_execution")
 	inputBuf         strings.Builder // accumulates input_json_delta fragments
 	firstDelta       bool            // true until the first input_json_delta is consumed
+	// isCustomTool is true for user-defined function tools (type: tool_use).
+	// false for provider-executed tools (type: server_tool_use).
+	// tool-input-start/delta/end stream events are only emitted for custom tools.
+	isCustomTool bool
 }
 
 // anthropicStream implements provider.TextStream for Anthropic streaming
@@ -976,15 +1026,26 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 				}
 			}
 			block := &streamContentBlock{
-				blockType:  "tool-call",
-				toolCallID: start.ContentBlock.ID,
-				toolName:   start.ContentBlock.Name,
-				firstDelta: initialInput == "", // expect deltas only when no initial input
+				blockType:    "tool-call",
+				toolCallID:   start.ContentBlock.ID,
+				toolName:     start.ContentBlock.Name,
+				firstDelta:   initialInput == "", // expect deltas only when no initial input
+				isCustomTool: true,              // user-defined function tool
 			}
 			if initialInput != "" {
 				block.inputBuf.WriteString(initialInput)
 			}
 			s.contentBlocks[start.Index] = block
+
+			// Emit tool-input-start so consumers can observe when tool input
+			// streaming begins. This enables fine-grained tool streaming UI.
+			return &provider.StreamChunk{
+				Type: provider.ChunkTypeToolInputStart,
+				ToolCall: &types.ToolCall{
+					ID:       block.toolCallID,
+					ToolName: block.toolName,
+				},
+			}, nil
 
 		case "thinking":
 			s.contentBlocks[start.Index] = &streamContentBlock{
@@ -1187,6 +1248,15 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 			}
 			block.firstDelta = false
 			block.inputBuf.WriteString(partialJSON)
+
+			// For custom function tools, emit a tool-input-delta with the raw
+			// delta so consumers can display streaming tool input in real time.
+			if block.isCustomTool {
+				return &provider.StreamChunk{
+					Type: provider.ChunkTypeToolInputDelta,
+					Text: delta.Delta.PartialJSON,
+				}, nil
+			}
 			return s.Next()
 
 		case "thinking_delta":
@@ -1239,14 +1309,27 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 			if args == nil {
 				args = map[string]interface{}{}
 			}
-			return &provider.StreamChunk{
+			toolCallChunk := &provider.StreamChunk{
 				Type: provider.ChunkTypeToolCall,
 				ToolCall: &types.ToolCall{
 					ID:        block.toolCallID,
 					ToolName:  block.toolName,
 					Arguments: args,
 				},
-			}, nil
+			}
+			// For custom function tools, emit tool-input-end first, then the
+			// assembled tool-call via the pending queue. This completes the
+			// tool-input-start → tool-input-delta(×N) → tool-input-end sequence.
+			if block.isCustomTool {
+				s.pending = append(s.pending, toolCallChunk)
+				return &provider.StreamChunk{
+					Type: provider.ChunkTypeToolInputEnd,
+					ToolCall: &types.ToolCall{
+						ID: block.toolCallID,
+					},
+				}, nil
+			}
+			return toolCallChunk, nil
 		}
 		// json-response-tool, text, reasoning, or unknown — no chunk to emit.
 		return s.Next()
