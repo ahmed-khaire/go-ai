@@ -285,6 +285,26 @@ const (
 	// or audio clip produced by the model).  The chunk carries a
 	// GeneratedFileContent part.
 	ChunkTypeFile ChunkType = "file"
+
+	// ChunkTypeToolInputStart marks the beginning of streaming tool input for a
+	// custom function tool call.  The ToolCall field contains the tool call ID and
+	// name.  Subsequent ChunkTypeToolInputDelta chunks carry incremental JSON and
+	// ChunkTypeToolInputEnd marks completion.  A final ChunkTypeToolCall is always
+	// emitted after ChunkTypeToolInputEnd with the fully assembled arguments.
+	//
+	// Only emitted for user-defined function tools (type: tool_use), not for
+	// provider-executed tools (type: server_tool_use).
+	ChunkTypeToolInputStart ChunkType = "tool-input-start"
+
+	// ChunkTypeToolInputDelta carries an incremental chunk of tool input JSON
+	// during eager input streaming.  The Text field contains the raw partial JSON
+	// fragment exactly as received from the API.  Follows ChunkTypeToolInputStart.
+	ChunkTypeToolInputDelta ChunkType = "tool-input-delta"
+
+	// ChunkTypeToolInputEnd marks the end of tool input streaming for a custom
+	// function tool.  The ToolCall field carries the tool call ID.  A
+	// ChunkTypeToolCall chunk with the fully parsed arguments always follows.
+	ChunkTypeToolInputEnd ChunkType = "tool-input-end"
 )
 
 // EmbeddingModel represents an embedding model
