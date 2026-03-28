@@ -1,5 +1,53 @@
 package xai
 
+// Language model ID constants for xAI Grok language models.
+// Use these constants instead of raw strings to avoid typos and get IDE support.
+// See https://docs.x.ai/docs for the full list.
+//
+// Removed model IDs (XAI shut down their APIs — do not re-add):
+//   - "grok-2"              (use grok-3 or later)
+//   - "grok-2-vision-1212"  (use a current multimodal model instead)
+const (
+	// ModelGrokBeta — Grok Beta language model (default)
+	ModelGrokBeta = "grok-beta"
+
+	// ModelGrok3 — Grok 3 language model
+	ModelGrok3 = "grok-3"
+
+	// ModelGrok3Latest — Grok 3 language model (latest alias)
+	ModelGrok3Latest = "grok-3-latest"
+
+	// ModelGrok3Mini — Grok 3 Mini language model (faster, cheaper)
+	ModelGrok3Mini = "grok-3-mini"
+
+	// ModelGrok3MiniLatest — Grok 3 Mini language model (latest alias)
+	ModelGrok3MiniLatest = "grok-3-mini-latest"
+
+	// ModelGrok4 — Grok 4 language model
+	ModelGrok4 = "grok-4"
+
+	// ModelGrok40709 — Grok 4 dated release (2025-07-09)
+	ModelGrok40709 = "grok-4-0709"
+
+	// ModelGrok4Latest — Grok 4 language model (latest alias)
+	ModelGrok4Latest = "grok-4-latest"
+
+	// ModelGrok4FastReasoning — Grok 4 fast reasoning model
+	ModelGrok4FastReasoning = "grok-4-fast-reasoning"
+
+	// ModelGrok4FastNonReasoning — Grok 4 fast non-reasoning model
+	ModelGrok4FastNonReasoning = "grok-4-fast-non-reasoning"
+
+	// ModelGrok41FastReasoning — Grok 4.1 fast reasoning model
+	ModelGrok41FastReasoning = "grok-4-1-fast-reasoning"
+
+	// ModelGrok41FastNonReasoning — Grok 4.1 fast non-reasoning model
+	ModelGrok41FastNonReasoning = "grok-4-1-fast-non-reasoning"
+
+	// ModelGrokCodeFast1 — Grok Code fast model
+	ModelGrokCodeFast1 = "grok-code-fast-1"
+)
+
 // Image model ID constants for xAI Grok image generation models.
 // Use these constants instead of raw strings to avoid typos and get IDE support.
 // See https://docs.x.ai/docs for the full list.

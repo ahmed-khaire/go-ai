@@ -46,7 +46,9 @@ type XAIImageProviderOptions struct {
 	// AspectRatio for image generation (e.g., "16:9", "1:1", "9:16")
 	AspectRatio *string `json:"aspect_ratio,omitempty"`
 
-	// OutputFormat specifies the image format (e.g., "png", "jpeg")
+	// OutputFormat specifies the image format.
+	// Valid values: "png", "jpeg", "b64_json".
+	// Use "b64_json" to receive base64-encoded image data instead of a URL.
 	OutputFormat *string `json:"output_format,omitempty"`
 
 	// SyncMode controls synchronous vs asynchronous generation
@@ -56,6 +58,30 @@ type XAIImageProviderOptions struct {
 	// Accepted values: "1k" (1024px), "2k" (2048px).
 	// Only supported by models that accept this option (e.g., grok-imagine-image-pro).
 	Resolution *string `json:"resolution,omitempty"`
+
+	// Quality controls the output quality.
+	// Valid values: "low", "medium", "high".
+	Quality *string `json:"quality,omitempty"`
+
+	// User is a unique identifier for the end user, used for abuse detection.
+	User *string `json:"user,omitempty"`
+}
+
+// XAIImageMetadata holds provider-specific metadata returned by XAI image models.
+type XAIImageMetadata struct {
+	// Images contains per-image metadata (e.g., revised prompts).
+	Images []XAIImageItemMetadata `json:"images,omitempty"`
+
+	// CostInUsdTicks is the cost of the image generation in USD ticks
+	// (1 tick = 0.000001 USD).
+	CostInUsdTicks *int64 `json:"costInUsdTicks,omitempty"`
+}
+
+// XAIImageItemMetadata holds per-image metadata from the XAI image API.
+type XAIImageItemMetadata struct {
+	// RevisedPrompt is the prompt that was actually used to generate the image,
+	// after any safety or quality revisions applied by the model.
+	RevisedPrompt *string `json:"revisedPrompt,omitempty"`
 }
 
 // DoGenerate performs image generation or editing
@@ -93,22 +119,52 @@ func (m *ImageModel) DoGenerate(ctx context.Context, opts *provider.ImageGenerat
 			"no images in response", nil)
 	}
 
-	// Download first image (Go ImageResult only supports single image)
-	imageBytes, err := m.downloadImage(ctx, resp.Data[0].URL)
-	if err != nil {
+	imageData := resp.Data[0]
+
+	// Handle b64_json or URL response format.
+	var imageBytes []byte
+	var mimeType string
+	if imageData.B64JSON != "" {
+		decoded, decErr := base64.StdEncoding.DecodeString(imageData.B64JSON)
+		if decErr != nil {
+			return nil, providererrors.NewProviderError("xai", 0, "",
+				fmt.Sprintf("failed to decode b64_json image: %v", decErr), decErr)
+		}
+		imageBytes = decoded
+		mimeType = "image/png"
+	} else if imageData.URL != "" {
+		imageBytes, err = m.downloadImage(ctx, imageData.URL)
+		if err != nil {
+			return nil, providererrors.NewProviderError("xai", 0, "",
+				fmt.Sprintf("failed to download image: %v", err), err)
+		}
+		mimeType = "image/png"
+	} else {
 		return nil, providererrors.NewProviderError("xai", 0, "",
-			fmt.Sprintf("failed to download image: %v", err), err)
+			"no image data (neither url nor b64_json) in response", nil)
 	}
 
 	// Build result with single image
 	result := &types.ImageResult{
 		Image:    imageBytes,
-		MimeType: "image/png", // XAI typically returns PNG
+		MimeType: mimeType,
+		URL:      imageData.URL,
 		Usage: types.ImageUsage{
 			ImageCount: len(resp.Data),
 		},
 		Warnings: warnings,
 	}
+
+	// Always build providerMetadata with per-image array (exposes revisedPrompt).
+	imagesMeta := make([]XAIImageItemMetadata, len(resp.Data))
+	for i, d := range resp.Data {
+		imagesMeta[i] = XAIImageItemMetadata{RevisedPrompt: d.RevisedPrompt}
+	}
+	meta := XAIImageMetadata{Images: imagesMeta}
+	if resp.Usage != nil && resp.Usage.CostInUsdTicks != nil {
+		meta.CostInUsdTicks = resp.Usage.CostInUsdTicks
+	}
+	result.ProviderMetadata = map[string]interface{}{"xai": meta}
 
 	return result, nil
 }
@@ -118,7 +174,7 @@ func (m *ImageModel) buildRequestBody(opts *provider.ImageGenerateOptions, provO
 	body := map[string]interface{}{
 		"model":           m.modelID,
 		"prompt":          opts.Prompt,
-		"response_format": "url",
+		"response_format": "b64_json", // Always request base64 data directly from the API.
 	}
 
 	// Add N (number of images)
@@ -148,23 +204,27 @@ func (m *ImageModel) buildRequestBody(opts *provider.ImageGenerateOptions, provO
 		body["resolution"] = *provOpts.Resolution
 	}
 
-	// Add source image for editing/variations
-	if hasFiles && len(opts.Files) > 0 {
-		imageURL := m.convertImageFileToDataURI(opts.Files[0])
-		body["image"] = map[string]interface{}{
-			"url":  imageURL,
-			"type": "image_url",
-		}
+	if provOpts.Quality != nil {
+		body["quality"] = *provOpts.Quality
 	}
 
-	// Add mask for inpainting
-	if opts.Mask != nil {
-		maskURL := m.convertImageFileToDataURI(*opts.Mask)
-		body["mask"] = map[string]interface{}{
-			"url":  maskURL,
-			"type": "image_url",
-		}
+	if provOpts.User != nil {
+		body["user"] = *provOpts.User
 	}
+
+	// Add source images for editing — accepts multiple reference images as an array.
+	if hasFiles {
+		images := make([]map[string]interface{}, 0, len(opts.Files))
+		for _, f := range opts.Files {
+			images = append(images, map[string]interface{}{
+				"url":  m.convertImageFileToDataURI(f),
+				"type": "image_url",
+			})
+		}
+		body["images"] = images
+	}
+
+	// mask is not supported by the xAI image API — omitted intentionally.
 
 	return body
 }
@@ -203,18 +263,10 @@ func (m *ImageModel) checkUnsupportedOptions(opts *provider.ImageGenerateOptions
 		})
 	}
 
-	hasFiles := len(opts.Files) > 0
-	if opts.Mask != nil && !hasFiles {
+	if opts.Mask != nil {
 		warnings = append(warnings, types.Warning{
 			Type:    "unsupported-option",
-			Message: "Mask is only supported with image editing (requires Files)",
-		})
-	}
-
-	if hasFiles && len(opts.Files) > 1 {
-		warnings = append(warnings, types.Warning{
-			Type:    "other",
-			Message: "XAI only supports a single input image. Additional images are ignored.",
+			Message: "XAI image model does not support mask/inpainting.",
 		})
 	}
 
@@ -261,11 +313,18 @@ func (m *ImageModel) handleError(err error) error {
 
 // xaiImageResponse represents the image generation API response
 type xaiImageResponse struct {
-	Data []xaiImageData `json:"data"`
+	Data  []xaiImageData  `json:"data"`
+	Usage *xaiImageUsage  `json:"usage,omitempty"`
+}
+
+// xaiImageUsage holds top-level usage data from the image generation response.
+type xaiImageUsage struct {
+	CostInUsdTicks *int64 `json:"cost_in_usd_ticks,omitempty"`
 }
 
 // xaiImageData represents image data in the response
 type xaiImageData struct {
-	URL           string  `json:"url"`
+	URL           string  `json:"url,omitempty"`
+	B64JSON       string  `json:"b64_json,omitempty"`
 	RevisedPrompt *string `json:"revised_prompt,omitempty"`
 }

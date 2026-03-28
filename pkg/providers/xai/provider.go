@@ -64,8 +64,20 @@ func (p *Provider) Name() string {
 	return "xai"
 }
 
-// LanguageModel returns a language model by ID
+// LanguageModel returns a language model by ID using the Responses API (default).
+// Use ChatCompletionsLanguageModel for the legacy Chat Completions API.
 func (p *Provider) LanguageModel(modelID string) (provider.LanguageModel, error) {
+	if modelID == "" {
+		modelID = "grok-beta"
+	}
+
+	return NewResponsesLanguageModel(p, modelID), nil
+}
+
+// ChatCompletionsLanguageModel returns a language model that uses the Chat Completions
+// API (/v1/chat/completions). This is the legacy API path; prefer LanguageModel() for
+// new code which uses the Responses API by default.
+func (p *Provider) ChatCompletionsLanguageModel(modelID string) (provider.LanguageModel, error) {
 	if modelID == "" {
 		modelID = "grok-beta"
 	}

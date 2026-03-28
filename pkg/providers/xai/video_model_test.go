@@ -3,6 +3,7 @@ package xai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -734,4 +735,152 @@ func TestVideoModel_NoVideoURL(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no video URL")
+}
+
+// TestXAIVideoModerationError verifies that a moderated video status returns a ModerationError.
+func TestXAIVideoModerationError(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+
+		if requestCount == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"request_id": "test-request-id",
+			})
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "done",
+				"video": map[string]interface{}{
+					"url":               "https://example.com/video.mp4",
+					"respect_moderation": false,
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	prov := New(Config{
+		APIKey:  "test-key",
+		BaseURL: server.URL,
+	})
+	model := NewVideoModel(prov, "grok-imagine-video")
+
+	opts := &provider.VideoModelV3CallOptions{
+		Prompt: "A violent scene",
+	}
+
+	ctx := context.Background()
+	_, err := model.DoGenerate(ctx, opts)
+
+	require.Error(t, err)
+
+	// Must be (or wrap) a ModerationError.
+	var modErr *ModerationError
+	require.True(t, errors.As(err, &modErr), "error type = %T, want *ModerationError (possibly wrapped)", err)
+	assert.Contains(t, modErr.Message, "content policy violation")
+}
+
+// TestXAIVideoPassthroughOptions verifies that unrecognized provider options are passed
+// through to the video generation request body.
+func TestXAIVideoPassthroughOptions(t *testing.T) {
+	requestCount := 0
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			json.NewDecoder(r.Body).Decode(&capturedBody) //nolint:errcheck
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+				"request_id": "test-request-id",
+			})
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+				"status": "done",
+				"video": map[string]interface{}{
+					"url": "https://example.com/video.mp4",
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	prov := New(Config{APIKey: "test-key", BaseURL: server.URL})
+	model := NewVideoModel(prov, "grok-imagine-video")
+
+	guidance := float64(7)
+	opts := &provider.VideoModelV3CallOptions{
+		Prompt: "A cinematic sunset",
+		ProviderOptions: map[string]interface{}{
+			"xai": map[string]interface{}{
+				"style":          "cinematic",
+				"guidance_scale": guidance,
+			},
+		},
+	}
+
+	ctx := context.Background()
+	resp, err := model.DoGenerate(ctx, opts)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	if capturedBody == nil {
+		t.Skip("server not reached")
+	}
+	assert.Equal(t, "cinematic", capturedBody["style"])
+	assert.Equal(t, guidance, capturedBody["guidance_scale"])
+}
+
+// TestXAIVideoCostMetadata verifies that costInUsdTicks from the video status response
+// is included in the ProviderMetadata of the result.
+func TestXAIVideoCostMetadata(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+
+		if requestCount == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"request_id": "test-request-id",
+			})
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "done",
+				"video": map[string]interface{}{
+					"url": "https://example.com/video.mp4",
+				},
+				"usage": map[string]interface{}{
+					"cost_in_usd_ticks": int64(150),
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	prov := New(Config{
+		APIKey:  "test-key",
+		BaseURL: server.URL,
+	})
+	model := NewVideoModel(prov, "grok-imagine-video")
+
+	opts := &provider.VideoModelV3CallOptions{
+		Prompt: "A sunset timelapse",
+	}
+
+	ctx := context.Background()
+	resp, err := model.DoGenerate(ctx, opts)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Check that costInUsdTicks is in provider metadata.
+	assert.Contains(t, resp.ProviderMetadata, "xai")
+	xaiMeta, ok := resp.ProviderMetadata["xai"].(map[string]interface{})
+	require.True(t, ok, "xai metadata type = %T, want map[string]interface{}", resp.ProviderMetadata["xai"])
+	assert.Contains(t, xaiMeta, "costInUsdTicks")
 }

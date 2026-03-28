@@ -12,11 +12,7 @@ import (
 func TestXAIConvertResponseTextString(t *testing.T) {
 	m := &LanguageModel{modelID: "grok-3"}
 	resp := xaiResponse{
-		Choices: []struct {
-			Index        int        `json:"index"`
-			FinishReason string     `json:"finish_reason"`
-			Message      xaiMessage `json:"message"`
-		}{
+		Choices: []xaiChoice{
 			{
 				FinishReason: "stop",
 				Message: xaiMessage{
@@ -27,7 +23,7 @@ func TestXAIConvertResponseTextString(t *testing.T) {
 		},
 	}
 
-	result := m.convertResponse(resp)
+	result := m.convertResponse(resp, "")
 	if result.Text != "Hello, world!" {
 		t.Errorf("Text = %q, want %q", result.Text, "Hello, world!")
 	}
@@ -42,11 +38,7 @@ func TestXAIConvertResponseArrayKnownTypes(t *testing.T) {
 	m := &LanguageModel{modelID: "grok-3"}
 	rawPart := json.RawMessage(`{"type":"text","text":"Part one. "}`)
 	resp := xaiResponse{
-		Choices: []struct {
-			Index        int        `json:"index"`
-			FinishReason string     `json:"finish_reason"`
-			Message      xaiMessage `json:"message"`
-		}{
+		Choices: []xaiChoice{
 			{
 				FinishReason: "stop",
 				Message: xaiMessage{
@@ -61,7 +53,7 @@ func TestXAIConvertResponseArrayKnownTypes(t *testing.T) {
 		},
 	}
 
-	result := m.convertResponse(resp)
+	result := m.convertResponse(resp, "")
 	if result.Text != "Part one. " {
 		t.Errorf("Text = %q, want %q", result.Text, "Part one. ")
 	}
@@ -77,11 +69,7 @@ func TestXAIConvertResponseUnknownContentEmitsCustomContent(t *testing.T) {
 	m := &LanguageModel{modelID: "grok-3"}
 	rawCitation := json.RawMessage(`{"type":"citation","url":"https://x.ai","title":"xAI"}`)
 	resp := xaiResponse{
-		Choices: []struct {
-			Index        int        `json:"index"`
-			FinishReason string     `json:"finish_reason"`
-			Message      xaiMessage `json:"message"`
-		}{
+		Choices: []xaiChoice{
 			{
 				FinishReason: "stop",
 				Message: xaiMessage{
@@ -97,7 +85,7 @@ func TestXAIConvertResponseUnknownContentEmitsCustomContent(t *testing.T) {
 		},
 	}
 
-	result := m.convertResponse(resp)
+	result := m.convertResponse(resp, "")
 
 	// Text from the "text" part should be in result.Text
 	if result.Text != "See reference." {
@@ -143,11 +131,7 @@ func TestXAIMessageContentUnmarshalString(t *testing.T) {
 func TestXAIConvertResponseCitationsEmitSourceContent(t *testing.T) {
 	m := &LanguageModel{modelID: "grok-3"}
 	resp := xaiResponse{
-		Choices: []struct {
-			Index        int        `json:"index"`
-			FinishReason string     `json:"finish_reason"`
-			Message      xaiMessage `json:"message"`
-		}{
+		Choices: []xaiChoice{
 			{
 				FinishReason: "stop",
 				Message: xaiMessage{
@@ -159,7 +143,7 @@ func TestXAIConvertResponseCitationsEmitSourceContent(t *testing.T) {
 		Citations: []string{"https://x.ai/news", "https://docs.x.ai/api"},
 	}
 
-	result := m.convertResponse(resp)
+	result := m.convertResponse(resp, "")
 
 	if result.Text != "See citations." {
 		t.Errorf("Text = %q, want %q", result.Text, "See citations.")
@@ -192,11 +176,7 @@ func TestXAIConvertResponseCitationsAndUnknownParts(t *testing.T) {
 	m := &LanguageModel{modelID: "grok-3"}
 	rawCitation := json.RawMessage(`{"type":"citation","url":"https://x.ai"}`)
 	resp := xaiResponse{
-		Choices: []struct {
-			Index        int        `json:"index"`
-			FinishReason string     `json:"finish_reason"`
-			Message      xaiMessage `json:"message"`
-		}{
+		Choices: []xaiChoice{
 			{
 				FinishReason: "stop",
 				Message: xaiMessage{
@@ -213,7 +193,7 @@ func TestXAIConvertResponseCitationsAndUnknownParts(t *testing.T) {
 		Citations: []string{"https://x.ai/news"},
 	}
 
-	result := m.convertResponse(resp)
+	result := m.convertResponse(resp, "")
 
 	if result.Text != "Answer." {
 		t.Errorf("Text = %q, want \"Answer.\"", result.Text)

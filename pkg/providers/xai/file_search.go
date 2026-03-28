@@ -1,10 +1,6 @@
 package xai
 
-import (
-	"context"
-
-	"github.com/digitallysavvy/go-ai/pkg/provider/types"
-)
+import "github.com/digitallysavvy/go-ai/pkg/provider/types"
 
 // FileSearchConfig contains configuration for the xAI FileSearch tool
 type FileSearchConfig struct {
@@ -31,6 +27,13 @@ type FileSearchConfig struct {
 //	    VectorStoreIDs: []string{"vs_123", "vs_456"},
 //	    MaxNumResults:  5,
 //	})
+// FileSearchOptions holds the config used by prepareXAIResponsesTools to serialize
+// the file_search tool into the Responses API request body.
+type FileSearchOptions struct {
+	VectorStoreIDs []string
+	MaxNumResults  int
+}
+
 func FileSearch(config FileSearchConfig) types.Tool {
 	// Set default max results if not specified
 	maxResults := config.MaxNumResults
@@ -77,20 +80,14 @@ func FileSearch(config FileSearchConfig) types.Tool {
 		Description: "Search vector stores for relevant information. Returns queries and results including file IDs, filenames, relevance scores, and matching text snippets.",
 		Title:       "File Search",
 		Parameters:  parameters,
+		// ProviderOptions carries the typed config for API serialization by prepareXAIResponsesTools.
+		ProviderOptions: FileSearchOptions{
+			VectorStoreIDs: config.VectorStoreIDs,
+			MaxNumResults:  maxResults,
+		},
 		// This tool is executed by xAI's servers, not locally
 		ProviderExecuted: true,
-		// Execute function is not needed for provider-executed tools
-		// The provider will handle execution and return results
-		Execute: func(ctx context.Context, input map[string]interface{}, options types.ToolExecutionOptions) (interface{}, error) {
-			// This should never be called for provider-executed tools
-			// The provider handles execution
-			return nil, &types.ToolExecutionError{
-				ToolCallID:       options.ToolCallID,
-				ToolName:         "xai.file_search",
-				Err:              context.Canceled,
-				ProviderExecuted: true,
-			}
-		},
+		Execute:          providerExecutedNoop("xai.file_search"),
 	}
 }
 
