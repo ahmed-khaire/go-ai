@@ -2,6 +2,9 @@ package ai
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 
@@ -12,6 +15,82 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// newCallID generates a short random hex string for correlating start/finish events.
+func newCallID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// EmbedOnStartEvent is emitted before calling the embedding model.
+type EmbedOnStartEvent struct {
+	// CallID is a unique identifier for this embedding call, correlates with EmbedOnFinishEvent.
+	CallID string
+	// OperationID is the canonical operation name (e.g. "ai.embed").
+	OperationID string
+	// Provider and ModelID identify the model.
+	Provider string
+	ModelID  string
+	// Values are the input texts being embedded (single value for Embed,
+	// multiple for EmbedMany).
+	Values []string
+	// MaxRetries is the configured retry limit (0 if not set).
+	MaxRetries int
+	// Ctx is the context passed to Embed / EmbedMany.
+	Ctx context.Context
+	// Headers are any extra HTTP headers forwarded to the model.
+	Headers map[string]string
+	// ProviderOptions holds provider-specific options keyed by provider name.
+	// Example: map[string]interface{}{"openai": map[string]interface{}{"dimensions": 256}}
+	ProviderOptions map[string]interface{}
+	// TelemetryEnabled indicates whether telemetry is active for this call.
+	TelemetryEnabled bool
+	// IsEnabled mirrors TelemetryEnabled for TS SDK API parity.
+	IsEnabled bool
+	// RecordInputs indicates whether inputs are recorded in telemetry.
+	RecordInputs bool
+	// RecordOutputs indicates whether outputs are recorded in telemetry.
+	RecordOutputs bool
+	// FunctionID is the telemetry function identifier for grouping related operations.
+	FunctionID string
+	// Metadata holds additional telemetry key-value pairs.
+	Metadata map[string]any
+}
+
+// EmbedOnFinishEvent is emitted after the embedding model returns.
+type EmbedOnFinishEvent struct {
+	// CallID matches the CallID in the corresponding EmbedOnStartEvent.
+	CallID string
+	// OperationID is the canonical operation name.
+	OperationID string
+	// Provider and ModelID identify the model.
+	Provider string
+	ModelID  string
+	// Value echoes the input(s) that were embedded (single string for Embed, slice for EmbedMany).
+	Value []string
+	// Embeddings contains the resulting vectors (one per input value).
+	Embeddings [][]float64
+	// Usage reports token consumption for this call.
+	Usage types.EmbeddingUsage
+	// Warnings are any non-fatal warnings emitted by the provider.
+	Warnings []types.Warning
+	// ProviderMetadata holds arbitrary provider-specific JSON metadata.
+	ProviderMetadata json.RawMessage
+	// Responses holds the HTTP response metadata from the provider.
+	// Length 1 for Embed; one entry per batch request for EmbedMany.
+	Responses []types.EmbeddingResponse
+	// IsEnabled indicates whether telemetry was active for this call.
+	IsEnabled bool
+	// RecordInputs indicates whether inputs are recorded in telemetry.
+	RecordInputs bool
+	// RecordOutputs indicates whether outputs are recorded in telemetry.
+	RecordOutputs bool
+	// FunctionID is the telemetry function identifier.
+	FunctionID string
+	// Metadata holds additional telemetry key-value pairs.
+	Metadata map[string]any
+}
+
 // EmbedOptions contains options for embedding generation
 type EmbedOptions struct {
 	// Model to use for embedding
@@ -20,8 +99,24 @@ type EmbedOptions struct {
 	// Input text to embed
 	Input string
 
+	// MaxRetries is the number of times to retry on transient failure (0 = no retries).
+	MaxRetries int
+
+	// Headers are additional HTTP headers forwarded to the model on each request.
+	Headers map[string]string
+
+	// ProviderOptions holds provider-specific options forwarded to the model.
+	// Keyed by provider name, e.g. map[string]interface{}{"openai": map[string]interface{}{"dimensions": 256}}.
+	ProviderOptions map[string]interface{}
+
 	// Telemetry configuration for observability
 	ExperimentalTelemetry *TelemetrySettings
+
+	// ExperimentalOnStart is called before the embedding model is invoked.
+	ExperimentalOnStart func(event EmbedOnStartEvent)
+
+	// ExperimentalOnFinish is called after the embedding model returns.
+	ExperimentalOnFinish func(event EmbedOnFinishEvent)
 }
 
 // EmbedResult contains the result of an embedding operation
@@ -31,6 +126,9 @@ type EmbedResult struct {
 
 	// Usage information
 	Usage types.EmbeddingUsage
+
+	// Warnings are any non-fatal warnings emitted by the provider.
+	Warnings []types.Warning
 }
 
 // Embed generates an embedding for a single text input
@@ -60,8 +158,8 @@ func Embed(ctx context.Context, opts EmbedOptions) (*EmbedResult, error) {
 		// Add base telemetry attributes
 		span.SetAttributes(
 			attribute.String("ai.operationId", "ai.embed"),
-			attribute.String("ai.model.provider", opts.Model.Provider()),
-			attribute.String("ai.model.id", opts.Model.ModelID()),
+			attribute.String("gen_ai.system", opts.Model.Provider()),
+			attribute.String("gen_ai.request.model", opts.Model.ModelID()),
 		)
 
 		// Add function ID if present
@@ -83,8 +181,55 @@ func Embed(ctx context.Context, opts EmbedOptions) (*EmbedResult, error) {
 		}
 	}
 
+	// Generate a unique call ID for correlating start/finish events.
+	callID := newCallID()
+
+	// Extract telemetry fields for callback population.
+	telEnabled := opts.ExperimentalTelemetry != nil && opts.ExperimentalTelemetry.IsEnabled
+	var telFuncID string
+	var telMeta map[string]any
+	var telRecordInputs, telRecordOutputs bool
+	if opts.ExperimentalTelemetry != nil {
+		telFuncID = opts.ExperimentalTelemetry.FunctionID
+		telRecordInputs = opts.ExperimentalTelemetry.RecordInputs
+		telRecordOutputs = opts.ExperimentalTelemetry.RecordOutputs
+		if len(opts.ExperimentalTelemetry.Metadata) > 0 {
+			telMeta = make(map[string]any, len(opts.ExperimentalTelemetry.Metadata))
+			for k, v := range opts.ExperimentalTelemetry.Metadata {
+				telMeta[k] = v.Emit()
+			}
+		}
+	}
+
+	// Fire ExperimentalOnStart callback
+	if opts.ExperimentalOnStart != nil {
+		opts.ExperimentalOnStart(EmbedOnStartEvent{
+			CallID:           callID,
+			OperationID:      "ai.embed",
+			Provider:         opts.Model.Provider(),
+			ModelID:          opts.Model.ModelID(),
+			Values:           []string{opts.Input},
+			MaxRetries:       opts.MaxRetries,
+			Ctx:              ctx,
+			Headers:          opts.Headers,
+			ProviderOptions:  opts.ProviderOptions,
+			TelemetryEnabled: telEnabled,
+			IsEnabled:        telEnabled,
+			RecordInputs:     telRecordInputs,
+			RecordOutputs:    telRecordOutputs,
+			FunctionID:       telFuncID,
+			Metadata:         telMeta,
+		})
+	}
+
+	// Build provider-level options.
+	embedModelOpts := &provider.EmbedModelOptions{
+		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
+	}
+
 	// Call the model
-	result, err := opts.Model.DoEmbed(ctx, opts.Input)
+	result, err := opts.Model.DoEmbed(ctx, opts.Input, embedModelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
@@ -92,12 +237,33 @@ func Embed(ctx context.Context, opts EmbedOptions) (*EmbedResult, error) {
 	embedResult := &EmbedResult{
 		Embedding: result.Embedding,
 		Usage:     result.Usage,
+		Warnings:  result.Warnings,
 	}
 
 	// Record telemetry output attributes
 	if span != nil {
 		// Record usage information
 		span.SetAttributes(attribute.Int("ai.usage.tokens", embedResult.Usage.TotalTokens))
+	}
+
+	// Fire ExperimentalOnFinish callback
+	if opts.ExperimentalOnFinish != nil {
+		opts.ExperimentalOnFinish(EmbedOnFinishEvent{
+			CallID:        callID,
+			OperationID:   "ai.embed",
+			Provider:      opts.Model.Provider(),
+			ModelID:       opts.Model.ModelID(),
+			Value:         []string{opts.Input},
+			Embeddings:    [][]float64{embedResult.Embedding},
+			Usage:         embedResult.Usage,
+			Warnings:      embedResult.Warnings,
+			Responses:     []types.EmbeddingResponse{result.Response},
+			IsEnabled:     telEnabled,
+			RecordInputs:  telRecordInputs,
+			RecordOutputs: telRecordOutputs,
+			FunctionID:    telFuncID,
+			Metadata:      telMeta,
+		})
 	}
 
 	return embedResult, nil
@@ -111,8 +277,24 @@ type EmbedManyOptions struct {
 	// Input texts to embed
 	Inputs []string
 
+	// MaxRetries is the number of times to retry on transient failure (0 = no retries).
+	MaxRetries int
+
+	// Headers are additional HTTP headers forwarded to the model on each request.
+	Headers map[string]string
+
+	// ProviderOptions holds provider-specific options forwarded to the model.
+	// Keyed by provider name, e.g. map[string]interface{}{"openai": map[string]interface{}{"dimensions": 256}}.
+	ProviderOptions map[string]interface{}
+
 	// Telemetry configuration for observability
 	ExperimentalTelemetry *TelemetrySettings
+
+	// ExperimentalOnStart is called before the embedding model is invoked.
+	ExperimentalOnStart func(event EmbedOnStartEvent)
+
+	// ExperimentalOnFinish is called after the embedding model returns.
+	ExperimentalOnFinish func(event EmbedOnFinishEvent)
 }
 
 // EmbedManyResult contains the result of a batch embedding operation
@@ -122,6 +304,9 @@ type EmbedManyResult struct {
 
 	// Usage information
 	Usage types.EmbeddingUsage
+
+	// Warnings are any non-fatal warnings emitted by the provider.
+	Warnings []types.Warning
 }
 
 // EmbedMany generates embeddings for multiple text inputs in a batch
@@ -151,8 +336,8 @@ func EmbedMany(ctx context.Context, opts EmbedManyOptions) (*EmbedManyResult, er
 		// Add base telemetry attributes
 		span.SetAttributes(
 			attribute.String("ai.operationId", "ai.embedMany"),
-			attribute.String("ai.model.provider", opts.Model.Provider()),
-			attribute.String("ai.model.id", opts.Model.ModelID()),
+			attribute.String("gen_ai.system", opts.Model.Provider()),
+			attribute.String("gen_ai.request.model", opts.Model.ModelID()),
 			attribute.Int("ai.values.count", len(opts.Inputs)),
 		)
 
@@ -170,8 +355,55 @@ func EmbedMany(ctx context.Context, opts EmbedManyOptions) (*EmbedManyResult, er
 		}
 	}
 
+	// Generate a unique call ID for correlating start/finish events.
+	callID := newCallID()
+
+	// Extract telemetry fields for callback population.
+	telEnabled := opts.ExperimentalTelemetry != nil && opts.ExperimentalTelemetry.IsEnabled
+	var telFuncID string
+	var telMeta map[string]any
+	var telRecordInputs, telRecordOutputs bool
+	if opts.ExperimentalTelemetry != nil {
+		telFuncID = opts.ExperimentalTelemetry.FunctionID
+		telRecordInputs = opts.ExperimentalTelemetry.RecordInputs
+		telRecordOutputs = opts.ExperimentalTelemetry.RecordOutputs
+		if len(opts.ExperimentalTelemetry.Metadata) > 0 {
+			telMeta = make(map[string]any, len(opts.ExperimentalTelemetry.Metadata))
+			for k, v := range opts.ExperimentalTelemetry.Metadata {
+				telMeta[k] = v.Emit()
+			}
+		}
+	}
+
+	// Fire ExperimentalOnStart callback
+	if opts.ExperimentalOnStart != nil {
+		opts.ExperimentalOnStart(EmbedOnStartEvent{
+			CallID:           callID,
+			OperationID:      "ai.embedMany",
+			Provider:         opts.Model.Provider(),
+			ModelID:          opts.Model.ModelID(),
+			Values:           opts.Inputs,
+			MaxRetries:       opts.MaxRetries,
+			Ctx:              ctx,
+			Headers:          opts.Headers,
+			ProviderOptions:  opts.ProviderOptions,
+			TelemetryEnabled: telEnabled,
+			IsEnabled:        telEnabled,
+			RecordInputs:     telRecordInputs,
+			RecordOutputs:    telRecordOutputs,
+			FunctionID:       telFuncID,
+			Metadata:         telMeta,
+		})
+	}
+
+	// Build provider-level options.
+	embedModelOpts := &provider.EmbedModelOptions{
+		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
+	}
+
 	// Call the model
-	result, err := opts.Model.DoEmbedMany(ctx, opts.Inputs)
+	result, err := opts.Model.DoEmbedMany(ctx, opts.Inputs, embedModelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("batch embedding failed: %w", err)
 	}
@@ -179,12 +411,33 @@ func EmbedMany(ctx context.Context, opts EmbedManyOptions) (*EmbedManyResult, er
 	embedResult := &EmbedManyResult{
 		Embeddings: result.Embeddings,
 		Usage:      result.Usage,
+		Warnings:   result.Warnings,
 	}
 
 	// Record telemetry output attributes
 	if span != nil {
 		// Record usage information
 		span.SetAttributes(attribute.Int("ai.usage.tokens", embedResult.Usage.TotalTokens))
+	}
+
+	// Fire ExperimentalOnFinish callback
+	if opts.ExperimentalOnFinish != nil {
+		opts.ExperimentalOnFinish(EmbedOnFinishEvent{
+			CallID:        callID,
+			OperationID:   "ai.embedMany",
+			Provider:      opts.Model.Provider(),
+			ModelID:       opts.Model.ModelID(),
+			Value:         opts.Inputs,
+			Embeddings:    embedResult.Embeddings,
+			Usage:         embedResult.Usage,
+			Warnings:      embedResult.Warnings,
+			Responses:     result.Responses,
+			IsEnabled:     telEnabled,
+			RecordInputs:  telRecordInputs,
+			RecordOutputs: telRecordOutputs,
+			FunctionID:    telFuncID,
+			Metadata:      telMeta,
+		})
 	}
 
 	return embedResult, nil

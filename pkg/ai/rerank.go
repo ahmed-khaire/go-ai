@@ -2,12 +2,82 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
+
+// RerankOnStartEvent is emitted before calling the reranking model.
+type RerankOnStartEvent struct {
+	// CallID is a unique identifier for this reranking call, correlates with RerankOnFinishEvent.
+	CallID string
+	// OperationID is the canonical operation name ("ai.rerank").
+	OperationID string
+	// Provider and ModelID identify the model.
+	Provider string
+	ModelID  string
+	// Query is the query being used to rerank documents.
+	Query string
+	// Documents are the documents being reranked.
+	Documents interface{}
+	// TopN is the requested number of top results (nil means return all).
+	TopN *int
+	// MaxRetries is the configured retry limit (0 if not set).
+	MaxRetries int
+	// Headers are any extra HTTP headers forwarded to the model.
+	Headers map[string]string
+	// ProviderOptions holds provider-specific options keyed by provider name.
+	// Example: map[string]interface{}{"cohere": map[string]interface{}{"returnDocuments": true}}
+	ProviderOptions map[string]interface{}
+	// IsEnabled indicates whether telemetry is active for this call.
+	IsEnabled bool
+	// RecordInputs indicates whether inputs are recorded in telemetry.
+	RecordInputs bool
+	// RecordOutputs indicates whether outputs are recorded in telemetry.
+	RecordOutputs bool
+	// FunctionID is the telemetry function identifier.
+	FunctionID string
+	// Metadata holds additional telemetry key-value pairs.
+	Metadata map[string]any
+}
+
+// RerankOnFinishEvent is emitted after the reranking model returns.
+type RerankOnFinishEvent struct {
+	// CallID matches the CallID in the corresponding RerankOnStartEvent.
+	CallID string
+	// OperationID is the canonical operation name ("ai.rerank").
+	OperationID string
+	// Provider and ModelID identify the model.
+	Provider string
+	ModelID  string
+	// Documents are the documents that were reranked.
+	Documents interface{}
+	// Query is the query that documents were reranked against.
+	Query string
+	// Ranking is the reranked results sorted by relevance score (descending).
+	Ranking []RerankItem
+	// Warnings are any non-fatal warnings emitted by the provider.
+	Warnings []types.Warning
+	// Response holds structured response metadata (id, timestamp, modelId, headers).
+	Response types.RerankResponse
+	// ProviderMetadata holds arbitrary provider-specific JSON metadata.
+	ProviderMetadata json.RawMessage
+	// Result is the full reranking result (for backward compatibility).
+	Result *RerankResult
+	// IsEnabled indicates whether telemetry was active for this call.
+	IsEnabled bool
+	// RecordInputs indicates whether inputs are recorded in telemetry.
+	RecordInputs bool
+	// RecordOutputs indicates whether outputs are recorded in telemetry.
+	RecordOutputs bool
+	// FunctionID is the telemetry function identifier.
+	FunctionID string
+	// Metadata holds additional telemetry key-value pairs.
+	Metadata map[string]any
+}
 
 // RerankOptions contains options for document reranking
 type RerankOptions struct {
@@ -24,8 +94,27 @@ type RerankOptions struct {
 	// If nil or 0, all documents are returned
 	TopN *int
 
+	// MaxRetries is the number of times to retry on transient failure (0 = no retries).
+	MaxRetries int
+
+	// Headers are additional HTTP headers forwarded to the model on each request.
+	Headers map[string]string
+
+	// ProviderOptions holds provider-specific options forwarded to the model.
+	// Keyed by provider name, e.g. map[string]interface{}{"cohere": map[string]interface{}{"returnDocuments": true}}.
+	ProviderOptions map[string]interface{}
+
+	// Telemetry configuration for observability
+	ExperimentalTelemetry *TelemetrySettings
+
 	// Callback called when reranking finishes
 	OnFinish func(result *RerankResult)
+
+	// ExperimentalOnStart is called before the reranking model is invoked.
+	ExperimentalOnStart func(event RerankOnStartEvent)
+
+	// ExperimentalOnFinish is called after the reranking model returns.
+	ExperimentalOnFinish func(event RerankOnFinishEvent)
 }
 
 // RerankResult contains the result of a reranking operation
@@ -41,6 +130,9 @@ type RerankResult struct {
 
 	// Response metadata
 	Response types.RerankResponse
+
+	// Warnings are any non-fatal warnings emitted by the provider.
+	Warnings []types.Warning
 
 	// Provider-specific metadata
 	ProviderMetadata interface{}
@@ -103,11 +195,55 @@ func Rerank(ctx context.Context, opts RerankOptions) (*RerankResult, error) {
 		}, nil
 	}
 
-	// Build rerank options
+	// Generate a unique call ID for correlating start/finish events.
+	callID := newCallID()
+
+	// Extract telemetry fields for callback population.
+	telEnabled := false
+	var telFuncID string
+	var telMeta map[string]any
+	var telRecordInputs, telRecordOutputs bool
+	if opts.ExperimentalTelemetry != nil {
+		telEnabled = opts.ExperimentalTelemetry.IsEnabled
+		telFuncID = opts.ExperimentalTelemetry.FunctionID
+		telRecordInputs = opts.ExperimentalTelemetry.RecordInputs
+		telRecordOutputs = opts.ExperimentalTelemetry.RecordOutputs
+		if len(opts.ExperimentalTelemetry.Metadata) > 0 {
+			telMeta = make(map[string]any, len(opts.ExperimentalTelemetry.Metadata))
+			for k, v := range opts.ExperimentalTelemetry.Metadata {
+				telMeta[k] = v.Emit()
+			}
+		}
+	}
+
+	// Fire ExperimentalOnStart callback
+	if opts.ExperimentalOnStart != nil {
+		opts.ExperimentalOnStart(RerankOnStartEvent{
+			CallID:          callID,
+			OperationID:     "ai.rerank",
+			Provider:        opts.Model.Provider(),
+			ModelID:         opts.Model.ModelID(),
+			Query:           opts.Query,
+			Documents:       opts.Documents,
+			TopN:            opts.TopN,
+			MaxRetries:      opts.MaxRetries,
+			Headers:         opts.Headers,
+			ProviderOptions: opts.ProviderOptions,
+			IsEnabled:       telEnabled,
+			RecordInputs:    telRecordInputs,
+			RecordOutputs:   telRecordOutputs,
+			FunctionID:      telFuncID,
+			Metadata:        telMeta,
+		})
+	}
+
+	// Build rerank options — thread caller-supplied headers and provider options to the provider.
 	rerankOpts := &provider.RerankOptions{
-		Documents: opts.Documents,
-		Query:     opts.Query,
-		TopN:      opts.TopN,
+		Documents:       opts.Documents,
+		Query:           opts.Query,
+		TopN:            opts.TopN,
+		Headers:         opts.Headers,
+		ProviderOptions: opts.ProviderOptions,
 	}
 
 	// Call the model
@@ -134,12 +270,42 @@ func Rerank(ctx context.Context, opts RerankOptions) (*RerankResult, error) {
 		Ranking:           ranking,
 		RerankedDocuments: rerankedDocs,
 		Response:          modelResult.Response,
+		Warnings:          modelResult.Warnings,
 		ProviderMetadata:  modelResult.ProviderMetadata,
 	}
 
 	// Call finish callback
 	if opts.OnFinish != nil {
 		opts.OnFinish(result)
+	}
+
+	// Fire ExperimentalOnFinish callback
+	if opts.ExperimentalOnFinish != nil {
+		// Marshal provider metadata to json.RawMessage if available.
+		var providerMeta json.RawMessage
+		if result.ProviderMetadata != nil {
+			if b, merr := json.Marshal(result.ProviderMetadata); merr == nil {
+				providerMeta = b
+			}
+		}
+		opts.ExperimentalOnFinish(RerankOnFinishEvent{
+			CallID:           callID,
+			OperationID:      "ai.rerank",
+			Provider:         opts.Model.Provider(),
+			ModelID:          opts.Model.ModelID(),
+			Documents:        opts.Documents,
+			Query:            opts.Query,
+			Ranking:          result.Ranking,
+			Warnings:         result.Warnings,
+			Response:         result.Response,
+			ProviderMetadata: providerMeta,
+			Result:           result,
+			IsEnabled:        telEnabled,
+			RecordInputs:     telRecordInputs,
+			RecordOutputs:    telRecordOutputs,
+			FunctionID:       telFuncID,
+			Metadata:         telMeta,
+		})
 	}
 
 	return result, nil

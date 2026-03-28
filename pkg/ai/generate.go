@@ -249,6 +249,9 @@ type GenerateTextResult struct {
 	// Warnings from the provider
 	Warnings []types.Warning
 
+	// ProviderMetadata holds provider-specific metadata from the last generation step.
+	ProviderMetadata map[string]interface{}
+
 	// Raw request/response (for debugging)
 	RawRequest  interface{}
 	RawResponse interface{}
@@ -433,6 +436,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (result *Genera
 				experimentalContext: opts.ExperimentalContext,
 				functionID:          cbFuncID,
 				metadata:            cbMeta,
+				timeout:             opts.Timeout,
 			}
 			toolResults, err := executeTools(ctx, genResult.ToolCalls, opts.Tools, opts.ExperimentalContext, &result.Usage, toolCallbacks)
 			if err != nil {
@@ -484,6 +488,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (result *Genera
 			result.Warnings = append(result.Warnings, genResult.Warnings...)
 			result.RawRequest = genResult.RawRequest
 			result.RawResponse = genResult.RawResponse
+			result.ProviderMetadata = genResult.ProviderMetadata
 
 			// Parse typed output if an Output spec was provided.
 			// Only parse when generation finished cleanly; a 'length' finish means
@@ -548,15 +553,25 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (result *Genera
 	}
 
 	// Fire OnFinish — integrations record output attributes and end their spans.
+	telUsage := telemetry.TelemetryUsage{
+		InputTokens:  result.Usage.InputTokens,
+		OutputTokens: result.Usage.OutputTokens,
+		TotalTokens:  result.Usage.TotalTokens,
+	}
+	if result.Usage.InputDetails != nil {
+		telUsage.NoCacheInputTokens = result.Usage.InputDetails.NoCacheTokens
+		telUsage.CacheReadInputTokens = result.Usage.InputDetails.CacheReadTokens
+		telUsage.CacheCreationInputTokens = result.Usage.InputDetails.CacheWriteTokens
+	}
+	if result.Usage.OutputDetails != nil {
+		telUsage.OutputTextTokens = result.Usage.OutputDetails.TextTokens
+		telUsage.ReasoningTokens = result.Usage.OutputDetails.ReasoningTokens
+	}
 	telemetry.FireOnFinish(ctx, telemetry.TelemetryFinishEvent{
 		FinishReason: string(result.FinishReason),
-		Usage: telemetry.TelemetryUsage{
-			InputTokens:  result.Usage.InputTokens,
-			OutputTokens: result.Usage.OutputTokens,
-			TotalTokens:  result.Usage.TotalTokens,
-		},
-		Text:     result.Text,
-		Settings: opts.ExperimentalTelemetry,
+		Usage:        telUsage,
+		Text:         result.Text,
+		Settings:     opts.ExperimentalTelemetry,
 	})
 
 	// Call finish callback (v6.0: with user context)
@@ -604,6 +619,7 @@ type toolCallEventCallbacks struct {
 	experimentalContext interface{}
 	functionID          string
 	metadata            map[string]any
+	timeout             *TimeoutConfig
 }
 
 // executeTools executes a list of tool calls
@@ -645,6 +661,7 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 			results[i] = types.ToolResult{
 				ToolCallID:       call.ID,
 				ToolName:         call.ToolName,
+				Input:            call.Arguments,
 				Result:           nil,
 				Error:            nil,
 				ProviderExecuted: true,
@@ -680,9 +697,16 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 				Metadata:    make(map[string]interface{}),
 			}
 
+			// Apply per-tool timeout if configured.
+			execCtx := toolCtx
+			execCancel := func() {}
+			if toolTimeout := callbacks.timeout.GetToolTimeout(call.ToolName); toolTimeout != nil {
+				execCtx, execCancel = context.WithTimeout(toolCtx, *toolTimeout)
+			}
+
 			startTime := now()
 			toolResult, toolErr := telemetry.FireExecuteTool(
-				toolCtx,
+				execCtx,
 				call.ToolName,
 				call.Arguments,
 				func(execCtx context.Context, args map[string]interface{}) (interface{}, error) {
@@ -690,10 +714,12 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 				},
 			)
 			durationMs := now() - startTime
+			execCancel() // release timeout resources immediately after execution
 
 			results[i] = types.ToolResult{
 				ToolCallID:       call.ID,
 				ToolName:         call.ToolName,
+				Input:            call.Arguments,
 				Result:           toolResult,
 				Error:            toolErr,
 				ProviderExecuted: false,

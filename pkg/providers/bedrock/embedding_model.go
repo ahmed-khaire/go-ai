@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
@@ -59,7 +60,7 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	// Determine model type and construct request body accordingly
 	var reqBody map[string]interface{}
 
@@ -196,14 +197,14 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	var embeddings [][]float64
 	var totalTokens int
 
 	// Process each input individually
 	// Bedrock embeddings typically don't support batch processing
 	for _, input := range inputs {
-		result, err := m.DoEmbed(ctx, input)
+		result, err := m.DoEmbed(ctx, input, opts)
 		if err != nil {
 			return nil, err
 		}

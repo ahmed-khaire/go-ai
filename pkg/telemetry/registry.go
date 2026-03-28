@@ -83,9 +83,16 @@ type TelemetryErrorEvent struct {
 
 // TelemetryUsage carries token counts for telemetry events.
 type TelemetryUsage struct {
-	InputTokens  *int64
-	OutputTokens *int64
-	TotalTokens  *int64
+	InputTokens              *int64
+	OutputTokens             *int64
+	TotalTokens              *int64
+	CacheReadInputTokens     *int64
+	CacheCreationInputTokens *int64
+	ReasoningTokens          *int64
+	// NoCacheInputTokens tracks tokens that bypassed the cache (ai.usage.inputTokenDetails.noCacheTokens).
+	NoCacheInputTokens *int64
+	// OutputTextTokens tracks text-only output tokens (ai.usage.outputTokenDetails.textTokens).
+	OutputTextTokens *int64
 }
 
 // ---------------------------------------------------------------------------
@@ -201,8 +208,8 @@ func (OTelTelemetryIntegration) OnStart(ctx context.Context, e TelemetryStartEve
 	ctx, span := tracer.Start(ctx, spanName)
 	span.SetAttributes(
 		attribute.String("ai.operationId", e.OperationType),
-		attribute.String("ai.model.provider", e.ModelProvider),
-		attribute.String("ai.model.id", e.ModelID),
+		attribute.String("gen_ai.system", e.ModelProvider),
+		attribute.String("gen_ai.request.model", e.ModelID),
 	)
 	if e.Settings.FunctionID != "" {
 		span.SetAttributes(attribute.String("ai.telemetry.functionId", e.Settings.FunctionID))
@@ -263,14 +270,45 @@ func (OTelTelemetryIntegration) OnFinish(ctx context.Context, e TelemetryFinishE
 		span.SetAttributes(attribute.String("ai.response.text", e.Text))
 	}
 	span.SetAttributes(attribute.String("ai.response.finishReason", e.FinishReason))
+	// Gen AI semantic convention attributes (OpenTelemetry Gen AI spec).
 	if e.Usage.InputTokens != nil {
-		span.SetAttributes(attribute.Int64("ai.usage.promptTokens", *e.Usage.InputTokens))
+		span.SetAttributes(attribute.Int64("gen_ai.usage.input_tokens", *e.Usage.InputTokens))
 	}
 	if e.Usage.OutputTokens != nil {
-		span.SetAttributes(attribute.Int64("ai.usage.completionTokens", *e.Usage.OutputTokens))
+		span.SetAttributes(attribute.Int64("gen_ai.usage.output_tokens", *e.Usage.OutputTokens))
+	}
+
+	// Legacy ai.usage.* attributes — TS SDK emits both namespaces for backward compat.
+	if e.Usage.InputTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.inputTokens", *e.Usage.InputTokens))
+	}
+	if e.Usage.OutputTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.outputTokens", *e.Usage.OutputTokens))
 	}
 	if e.Usage.TotalTokens != nil {
 		span.SetAttributes(attribute.Int64("ai.usage.totalTokens", *e.Usage.TotalTokens))
+	}
+	if e.Usage.ReasoningTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.reasoningTokens", *e.Usage.ReasoningTokens))
+	}
+	// ai.usage.cachedInputTokens is a legacy flat alias for cacheReadTokens.
+	if e.Usage.CacheReadInputTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.cachedInputTokens", *e.Usage.CacheReadInputTokens))
+	}
+	if e.Usage.NoCacheInputTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.inputTokenDetails.noCacheTokens", *e.Usage.NoCacheInputTokens))
+	}
+	if e.Usage.CacheReadInputTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.inputTokenDetails.cacheReadTokens", *e.Usage.CacheReadInputTokens))
+	}
+	if e.Usage.CacheCreationInputTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.inputTokenDetails.cacheWriteTokens", *e.Usage.CacheCreationInputTokens))
+	}
+	if e.Usage.OutputTextTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.outputTokenDetails.textTokens", *e.Usage.OutputTextTokens))
+	}
+	if e.Usage.ReasoningTokens != nil {
+		span.SetAttributes(attribute.Int64("ai.usage.outputTokenDetails.reasoningTokens", *e.Usage.ReasoningTokens))
 	}
 	span.End()
 }

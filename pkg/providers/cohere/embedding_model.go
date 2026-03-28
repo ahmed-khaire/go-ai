@@ -3,6 +3,7 @@ package cohere
 import (
 	"context"
 
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
@@ -54,8 +55,8 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
-	result, err := m.DoEmbedMany(ctx, []string{input})
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
+	result, err := m.DoEmbedMany(ctx, []string{input}, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	// Validate options
 	if err := m.options.Validate(); err != nil {
 		return nil, err

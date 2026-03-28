@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
@@ -50,7 +51,7 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding generation for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	path := fmt.Sprintf("/models/%s", m.modelID)
 
 	reqBody := map[string]interface{}{
@@ -84,7 +85,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 }
 
 // DoEmbedMany performs embedding generation for multiple inputs
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	path := fmt.Sprintf("/models/%s", m.modelID)
 
 	var embeddings [][]float64

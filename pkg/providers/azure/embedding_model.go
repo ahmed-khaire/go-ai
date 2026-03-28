@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
@@ -49,7 +50,7 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	// Build request body
 	reqBody := map[string]interface{}{
 		"input": input,
@@ -80,7 +81,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	// Build request body
 	reqBody := map[string]interface{}{
 		"input": inputs,
