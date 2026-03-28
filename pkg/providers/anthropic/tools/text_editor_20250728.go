@@ -144,7 +144,7 @@ Note: The undo_edit command is not supported in Claude 4 models.`
 		description += fmt.Sprintf("\n\nFile viewing is limited to %d characters to prevent context overflow.", *args.MaxCharacters)
 	}
 
-	tool := types.Tool{
+	return types.Tool{
 		Name:        "anthropic.text_editor_20250728",
 		Description: description,
 		Parameters:  parameters,
@@ -152,7 +152,24 @@ Note: The undo_edit command is not supported in Claude 4 models.`
 			return nil, fmt.Errorf("text editor tool must be executed by the provider (Anthropic). Set ProviderExecuted: true")
 		},
 		ProviderExecuted: true,
+		ProviderOptions:  &textEditor20250728Opts{MaxCharacters: args.MaxCharacters},
 	}
+}
 
-	return tool
+// textEditor20250728Opts holds the per-instance configuration for text_editor_20250728 and
+// implements anthropicAPIMapper so max_characters is serialized to the API when set.
+type textEditor20250728Opts struct {
+	MaxCharacters *int
+}
+
+// ToAnthropicAPIMap returns the Anthropic API representation of this text editor tool.
+func (o *textEditor20250728Opts) ToAnthropicAPIMap() map[string]interface{} {
+	m := map[string]interface{}{
+		"type": "text_editor_20250728",
+		"name": "str_replace_based_edit_tool",
+	}
+	if o.MaxCharacters != nil {
+		m["max_characters"] = *o.MaxCharacters
+	}
+	return m
 }
