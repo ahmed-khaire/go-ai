@@ -43,6 +43,11 @@ type ContentPart interface {
 // TextContent represents text content in a message
 type TextContent struct {
 	Text string `json:"text"`
+
+	// ProviderMetadata holds optional raw JSON metadata from the provider.
+	// Used by Google/Vertex providers to carry thoughtSignature for text parts
+	// that are associated with model reasoning.
+	ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
 }
 
 // ContentType implements ContentPart interface
@@ -279,6 +284,11 @@ const (
 
 	// ToolResultOutputError represents error output
 	ToolResultOutputError ToolResultOutputType = "error"
+
+	// ToolResultOutputExecutionDenied represents a tool call that was denied by
+	// the user approval gate before execution. The provider should receive a
+	// clear signal that the tool was not run so it can decide how to proceed.
+	ToolResultOutputExecutionDenied ToolResultOutputType = "execution-denied"
 )
 
 // ToolResultOutput represents structured tool result output
@@ -291,6 +301,11 @@ type ToolResultOutput struct {
 
 	// Content blocks for content type (array of content blocks)
 	Content []ToolResultContentBlock `json:"content,omitempty"`
+
+	// Reason is an optional human-readable explanation used with
+	// ToolResultOutputExecutionDenied to describe why the tool was not run.
+	// Forwarded to the provider so the model understands the denial context.
+	Reason string `json:"reason,omitempty"`
 }
 
 // ToolResultContentBlock represents a content block in tool results
