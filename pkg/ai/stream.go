@@ -380,8 +380,6 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 	pendingDeferredToolCalls := make(map[string]string)
 
 	var allSteps []types.StepResult
-	var allToolCalls []types.ToolCall
-	var allToolResults []types.ToolResult
 	firstChunkEver := true
 
 	for stepNum := 1; ; stepNum++ {
@@ -547,9 +545,6 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 		r.toolCalls = append(r.toolCalls, stepToolCalls...)
 		r.toolResults = append(r.toolResults, stepToolResults...)
 		r.mu.Unlock()
-		allToolCalls = append(allToolCalls, stepToolCalls...)
-		allToolResults = append(allToolResults, stepToolResults...)
-
 		// Record this step. For multi-step streaming, r.text accumulates across steps;
 		// use the current snapshot as the step's text.
 		stepResult := types.StepResult{

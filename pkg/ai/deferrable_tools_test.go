@@ -372,9 +372,10 @@ func TestDeferrableTools_MixedLocalAndProvider(t *testing.T) {
 	// Check that results are marked correctly
 	var localResult, providerResult *types.ToolResult
 	for i := range result.ToolResults {
-		if result.ToolResults[i].ToolName == "get_weather" {
+		switch result.ToolResults[i].ToolName {
+		case "get_weather":
 			localResult = &result.ToolResults[i]
-		} else if result.ToolResults[i].ToolName == "tool-search-bm25" {
+		case "tool-search-bm25":
 			providerResult = &result.ToolResults[i]
 		}
 	}
