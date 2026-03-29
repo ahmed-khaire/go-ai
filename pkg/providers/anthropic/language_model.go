@@ -514,6 +514,27 @@ func (m *LanguageModel) convertResponse(response anthropicResponse, usesJsonResp
 				ToolName:  content.Name,
 				Arguments: content.Input,
 			})
+		case "web_search_tool_result", "web_fetch_tool_result",
+			"code_execution_tool_result", "bash_code_execution_tool_result",
+			"text_editor_code_execution_tool_result", "tool_search_tool_result",
+			"mcp_tool_result":
+			// Deferred provider tool results: the provider executed the tool in a
+			// previous step and delivers the result inline here. Surface as
+			// ToolResultContent so the SDK's pendingDeferredToolCalls map is cleared.
+			trc := types.ToolResultContent{
+				ToolCallID: content.ToolUseID,
+				ToolName:   providerToolResultName(content.Type),
+			}
+			var parsed interface{}
+			if len(content.Content) > 0 {
+				json.Unmarshal(content.Content, &parsed) //nolint:errcheck
+			}
+			if content.IsError {
+				trc.Error = fmt.Sprintf("%v", parsed)
+			} else {
+				trc.Result = parsed
+			}
+			result.Content = append(result.Content, trc)
 		}
 	}
 
@@ -547,6 +568,25 @@ func (m *LanguageModel) convertResponse(response anthropicResponse, usesJsonResp
 	}
 
 	return result
+}
+
+// providerToolResultName returns the canonical tool name for an Anthropic deferred
+// tool result block type. Used when the serverToolCallNames lookup misses (e.g.,
+// the server_tool_use was in a previous step's response).
+func providerToolResultName(resultType string) string {
+	switch resultType {
+	case "web_search_tool_result":
+		return "web_search"
+	case "web_fetch_tool_result":
+		return "web_fetch"
+	case "code_execution_tool_result", "bash_code_execution_tool_result",
+		"text_editor_code_execution_tool_result":
+		return "code_execution"
+	case "tool_search_tool_result":
+		return "tool_search"
+	default:
+		return resultType
+	}
 }
 
 // convertAnthropicUsage converts Anthropic usage to detailed Usage struct
@@ -956,7 +996,7 @@ type UsageIteration struct {
 
 // anthropicContent represents content in an Anthropic response
 type anthropicContent struct {
-	Type      string                 `json:"type"` // "text", "tool_use", "thinking", "redacted_thinking"
+	Type      string                 `json:"type"` // "text", "tool_use", "thinking", "redacted_thinking", "*_tool_result"
 	Text      string                 `json:"text,omitempty"`
 	ID        string                 `json:"id,omitempty"`
 	Name      string                 `json:"name,omitempty"`
@@ -964,6 +1004,10 @@ type anthropicContent struct {
 	Thinking  string                 `json:"thinking,omitempty"`  // For "thinking" type
 	Signature string                 `json:"signature,omitempty"` // For "thinking" type
 	Data      string                 `json:"data,omitempty"`      // For "redacted_thinking" type
+	// Deferred provider tool result fields (web_search_tool_result, code_execution_tool_result, etc.)
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 // streamContentBlock tracks an in-flight content block across SSE events.
@@ -1008,6 +1052,10 @@ type anthropicStream struct {
 	// isJsonResponseFromTool is set when a tool_use{name:"json"} content block
 	// is opened in jsonTool mode. Used to map stop_reason="tool_use" to "stop".
 	isJsonResponseFromTool bool
+	// serverToolCallNames maps tool_use_id → tool name for provider-executed tools
+	// (server_tool_use and mcp_tool_use blocks). Used to look up the tool name when
+	// the corresponding *_tool_result block arrives (potentially in a later step).
+	serverToolCallNames map[string]string
 }
 
 // newAnthropicStream creates a new Anthropic stream.
@@ -1017,6 +1065,7 @@ func newAnthropicStream(reader io.ReadCloser, usesJsonResponseTool bool) *anthro
 		reader:               reader,
 		parser:               streaming.NewSSEParser(reader),
 		contentBlocks:        make(map[int]*streamContentBlock),
+		serverToolCallNames:  make(map[string]string),
 		usesJsonResponseTool: usesJsonResponseTool,
 	}
 }
@@ -1150,6 +1199,9 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 			if toolName == "bash_code_execution" || toolName == "text_editor_code_execution" {
 				toolName = "code_execution"
 			}
+			// Track tool call ID → tool name so the corresponding *_tool_result
+			// block (deferred result) can resolve the tool name.
+			s.serverToolCallNames[start.ContentBlock.ID] = toolName
 			s.contentBlocks[start.Index] = &streamContentBlock{
 				blockType:        "tool-call",
 				toolCallID:       start.ContentBlock.ID,
@@ -1165,6 +1217,8 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 			if input == nil {
 				input = map[string]interface{}{}
 			}
+			// Track tool call ID → tool name for mcp_tool_result lookup.
+			s.serverToolCallNames[start.ContentBlock.ID] = start.ContentBlock.Name
 			// Track as a non-buffering block so content_block_stop is a clean no-op.
 			s.contentBlocks[start.Index] = &streamContentBlock{
 				blockType: "mcp-tool-use",
@@ -1179,13 +1233,26 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 			}, nil
 
 		case "mcp_tool_result":
-			// MCP tool results arrive in content_block_start but there is no
-			// ToolResult chunk type in the Go stream API. Track the block so
-			// content_block_stop is a clean no-op.
+			// MCP tool results arrive in content_block_start. Emit as ChunkTypeToolResult
+			// so the SDK's pendingDeferredToolCalls map is cleared (P0-4).
+			toolName := s.serverToolCallNames[start.ContentBlock.ToolUseID]
+			tr := &types.ToolResult{
+				ToolCallID: start.ContentBlock.ToolUseID,
+				ToolName:   toolName,
+			}
+			if start.ContentBlock.IsError {
+				tr.Error = fmt.Errorf("mcp tool error: %v", start.ContentBlock.Content)
+			} else {
+				tr.Result = start.ContentBlock.Content
+			}
+			// Track so content_block_stop is a clean no-op.
 			s.contentBlocks[start.Index] = &streamContentBlock{
 				blockType: "mcp-tool-result",
 			}
-			return s.Next()
+			return &provider.StreamChunk{
+				Type:       provider.ChunkTypeToolResult,
+				ToolResult: tr,
+			}, nil
 
 		default:
 			// "text", "compaction", and any unknown types: record so
@@ -1217,6 +1284,10 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 					ID    string                 `json:"id"`
 					Name  string                 `json:"name"`
 					Input map[string]interface{} `json:"input"`
+					// Deferred provider tool result fields
+					ToolUseID string          `json:"tool_use_id,omitempty"`
+					Content   json.RawMessage `json:"content,omitempty"`
+					IsError   bool            `json:"is_error,omitempty"`
 				} `json:"content"`
 			} `json:"message"`
 		}
@@ -1231,33 +1302,65 @@ func (s *anthropicStream) Next() (*provider.StreamChunk, error) {
 				s.container = msg.Message.Container
 			}
 
-			// Buffer a chunk for each pre-populated tool_use block.
-			// In jsonTool mode the synthetic json tool becomes a text chunk;
-			// all other tool_use blocks become regular tool call chunks.
+			// Buffer chunks for each pre-populated content block.
+			// tool_use blocks become tool call chunks (or text in jsonTool mode).
+			// Deferred provider tool result blocks (web_search_tool_result, etc.)
+			// become ChunkTypeToolResult chunks so pendingDeferredToolCalls clears.
 			for _, part := range msg.Message.Content {
-				if part.Type != "tool_use" {
-					continue
-				}
-				args := part.Input
-				if args == nil {
-					args = map[string]interface{}{}
-				}
-				if s.usesJsonResponseTool && part.Name == "json" {
-					// jsonTool mode: emit the tool input as a text chunk.
-					s.isJsonResponseFromTool = true
-					inputJSON, _ := json.Marshal(args)
+				switch part.Type {
+				case "tool_use":
+					args := part.Input
+					if args == nil {
+						args = map[string]interface{}{}
+					}
+					if s.usesJsonResponseTool && part.Name == "json" {
+						// jsonTool mode: emit the tool input as a text chunk.
+						s.isJsonResponseFromTool = true
+						inputJSON, _ := json.Marshal(args)
+						s.pending = append(s.pending, &provider.StreamChunk{
+							Type: provider.ChunkTypeText,
+							Text: string(inputJSON),
+						})
+					} else {
+						s.pending = append(s.pending, &provider.StreamChunk{
+							Type: provider.ChunkTypeToolCall,
+							ToolCall: &types.ToolCall{
+								ID:        part.ID,
+								ToolName:  part.Name,
+								Arguments: args,
+							},
+						})
+					}
+				case "web_search_tool_result", "web_fetch_tool_result",
+					"code_execution_tool_result", "bash_code_execution_tool_result",
+					"text_editor_code_execution_tool_result", "tool_search_tool_result",
+					"mcp_tool_result":
+					// Deferred provider tool results pre-populated in message_start.
+					// Emit as ChunkTypeToolResult so the SDK can clear pendingDeferredToolCalls.
+					toolName := s.serverToolCallNames[part.ToolUseID]
+					if toolName == "" {
+						toolName = providerToolResultName(part.Type)
+					}
+					tr := &types.ToolResult{
+						ToolCallID: part.ToolUseID,
+						ToolName:   toolName,
+					}
+					if part.IsError {
+						var errContent interface{}
+						if len(part.Content) > 0 {
+							json.Unmarshal(part.Content, &errContent) //nolint:errcheck
+						}
+						tr.Error = fmt.Errorf("%v", errContent)
+					} else {
+						if len(part.Content) > 0 {
+							var result interface{}
+							json.Unmarshal(part.Content, &result) //nolint:errcheck
+							tr.Result = result
+						}
+					}
 					s.pending = append(s.pending, &provider.StreamChunk{
-						Type: provider.ChunkTypeText,
-						Text: string(inputJSON),
-					})
-				} else {
-					s.pending = append(s.pending, &provider.StreamChunk{
-						Type: provider.ChunkTypeToolCall,
-						ToolCall: &types.ToolCall{
-							ID:        part.ID,
-							ToolName:  part.Name,
-							Arguments: args,
-						},
+						Type:       provider.ChunkTypeToolResult,
+						ToolResult: tr,
 					})
 				}
 			}

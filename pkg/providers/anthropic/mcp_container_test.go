@@ -340,8 +340,9 @@ func TestMCPToolUseStreamingEmitsImmediately(t *testing.T) {
 	}
 }
 
-// MCP streaming: mcp_tool_result in content_block_start is a clean no-op.
-func TestMCPToolResultStreamingNoOp(t *testing.T) {
+// MCP streaming: mcp_tool_result in content_block_start emits a ChunkTypeToolResult
+// chunk so the SDK's pendingDeferredToolCalls map is cleared (P0-4).
+func TestMCPToolResultStreamingEmitsToolResult(t *testing.T) {
 	sseData := "" +
 		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"mcp_tool_result\",\"tool_use_id\":\"mcp-stream-001\",\"is_error\":false,\"content\":{\"results\":[]}}}\n\n" +
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
@@ -350,14 +351,28 @@ func TestMCPToolResultStreamingNoOp(t *testing.T) {
 
 	stream := newAnthropicStream(io.NopCloser(strings.NewReader(sseData)), false)
 
-	// mcp_tool_result + content_block_stop: both are no-ops, should skip to next event
+	// First chunk: ChunkTypeToolResult from the mcp_tool_result block.
 	chunk, err := stream.Next()
 	if err != nil {
 		t.Fatalf("Next() error: %v", err)
 	}
-	// Should get the text delta, not any tool result chunk
+	if chunk.Type != provider.ChunkTypeToolResult {
+		t.Errorf("chunk.Type = %v, want ChunkTypeToolResult", chunk.Type)
+	}
+	if chunk.ToolResult == nil {
+		t.Fatal("chunk.ToolResult is nil")
+	}
+	if chunk.ToolResult.ToolCallID != "mcp-stream-001" {
+		t.Errorf("ToolCallID = %q, want %q", chunk.ToolResult.ToolCallID, "mcp-stream-001")
+	}
+
+	// content_block_stop is a no-op; next real chunk is the text delta.
+	chunk, err = stream.Next()
+	if err != nil {
+		t.Fatalf("Next() error: %v", err)
+	}
 	if chunk.Type != provider.ChunkTypeText {
-		t.Errorf("chunk.Type = %v, want ChunkTypeText (mcp_tool_result should be skipped)", chunk.Type)
+		t.Errorf("chunk.Type = %v, want ChunkTypeText", chunk.Type)
 	}
 	if chunk.Text != "Done" {
 		t.Errorf("chunk.Text = %q, want Done", chunk.Text)
