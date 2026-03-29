@@ -49,9 +49,10 @@ const (
 	ModelGemini3FlashPreview    = "gemini-3-flash-preview"
 
 	// Gemini 3.1 series — added in #12695 and #12883
-	ModelGemini31ProPreview        = "gemini-3.1-pro-preview"         // language model (#12695)
-	ModelGemini31ProPreviewCustom  = "gemini-3.1-pro-preview-customtools" // (#12819)
-	ModelGemini31FlashImagePreview = "gemini-3.1-flash-image-preview" // image model (#12883)
+	ModelGemini31ProPreview        = "gemini-3.1-pro-preview"              // language model (#12695)
+	ModelGemini31ProPreviewCustom  = "gemini-3.1-pro-preview-customtools"  // (#12819)
+	ModelGemini31FlashLitePreview  = "gemini-3.1-flash-lite-preview"       // (#12883)
+	ModelGemini31FlashImagePreview = "gemini-3.1-flash-image-preview"      // image model (#12883)
 
 	// Latest alias models — added in #12819
 	ModelGeminiProLatest       = "gemini-pro-latest"

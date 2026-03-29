@@ -87,12 +87,10 @@ func (p *Provider) LanguageModel(modelID string) (provider.LanguageModel, error)
 
 // EmbeddingModel returns an embedding model by ID
 func (p *Provider) EmbeddingModel(modelID string) (provider.EmbeddingModel, error) {
-	// Validate model ID
 	if modelID == "" {
 		return nil, fmt.Errorf("model ID cannot be empty")
 	}
-
-	return nil, fmt.Errorf("embedding models not yet implemented for Google Vertex AI")
+	return NewEmbeddingModel(p, modelID), nil
 }
 
 // ImageModel returns an image generation model by ID

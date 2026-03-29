@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 
-	"github.com/digitallysavvy/go-ai/pkg/provider"
+	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
@@ -83,7 +85,6 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 
 // DoEmbed performs embedding for a single input
 func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
-	// Build request body
 	reqBody := map[string]interface{}{
 		"model": fmt.Sprintf("models/%s", m.modelID),
 		"content": map[string]interface{}{
@@ -92,23 +93,23 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 			},
 		},
 	}
-
-	// Build path with API key
 	path := fmt.Sprintf("/v1beta/models/%s:embedContent?key=%s", m.modelID, m.provider.APIKey())
 
-	// Make API request
 	var response googleEmbeddingResponse
-	err := m.provider.client.PostJSON(ctx, path, reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    path,
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
 
-	// Validate response
 	if response.Embedding == nil || len(response.Embedding.Values) == 0 {
 		return nil, fmt.Errorf("no embedding data in response")
 	}
 
-	// Convert response to EmbeddingResult
 	return &types.EmbeddingResult{
 		Embedding: response.Embedding.Values,
 		Usage: types.EmbeddingUsage{
@@ -116,6 +117,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 			InputTokens: 0,
 			TotalTokens: 0,
 		},
+		Response: types.EmbeddingResponse{Headers: map[string][]string(httpResp.Headers)},
 	}, nil
 }
 
@@ -128,24 +130,25 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 		}, nil
 	}
 
-	// Google doesn't have a native batch API, so we'll call individually
-	// TODO: Optimize with concurrent requests
+	// Google doesn't have a native batch API, so we call individually.
 	embeddings := make([][]float64, len(inputs))
+	responses := make([]types.EmbeddingResponse, 0, len(inputs))
 	for i, input := range inputs {
 		result, err := m.DoEmbed(ctx, input, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to embed input %d: %w", i, err)
 		}
 		embeddings[i] = result.Embedding
+		responses = append(responses, result.Response)
 	}
 
-	// Convert response to EmbeddingsResult
 	return &types.EmbeddingsResult{
 		Embeddings: embeddings,
 		Usage: types.EmbeddingUsage{
 			InputTokens: 0,
 			TotalTokens: 0,
 		},
+		Responses: responses,
 	}, nil
 }
 
@@ -161,11 +164,14 @@ func (m *EmbeddingModel) DoEmbedParts(ctx context.Context, text string, parts []
 			"parts": apiParts,
 		},
 	}
-
 	path := fmt.Sprintf("/v1beta/models/%s:embedContent?key=%s", m.modelID, m.provider.APIKey())
 
 	var response googleEmbeddingResponse
-	err := m.provider.client.PostJSON(ctx, path, reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method: http.MethodPost,
+		Path:   path,
+		Body:   reqBody,
+	}, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
@@ -177,6 +183,7 @@ func (m *EmbeddingModel) DoEmbedParts(ctx context.Context, text string, parts []
 	return &types.EmbeddingResult{
 		Embedding: response.Embedding.Values,
 		Usage:     types.EmbeddingUsage{},
+		Response:  types.EmbeddingResponse{Headers: map[string][]string(httpResp.Headers)},
 	}, nil
 }
 
@@ -205,6 +212,14 @@ func buildEmbeddingAPIParts(text string, parts []EmbeddingPart) []map[string]int
 // handleError converts various errors to provider errors
 func (m *EmbeddingModel) handleError(err error) error {
 	return providererrors.NewProviderError("google", 0, "", err.Error(), err)
+}
+
+// optsHeaders extracts the Headers map from EmbedModelOptions (nil-safe).
+func optsHeaders(opts *provider.EmbedModelOptions) map[string]string {
+	if opts == nil {
+		return nil
+	}
+	return opts.Headers
 }
 
 // googleEmbeddingResponse represents the Google embeddings API response

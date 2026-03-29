@@ -173,6 +173,24 @@ func (c *Client) DoJSON(ctx context.Context, req Request, result interface{}) er
 	return nil
 }
 
+// DoJSONResponse performs an HTTP request, decodes the JSON response body into result,
+// and returns the raw Response (status code + headers + body).
+// Use this instead of DoJSON when the caller needs response headers (e.g. to populate
+// EmbeddingResult.Response).
+func (c *Client) DoJSONResponse(ctx context.Context, req Request, result interface{}) (*Response, error) {
+	resp, err := c.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(resp.Body))
+	}
+	if err := json.Unmarshal(resp.Body, result); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON response: %w", err)
+	}
+	return resp, nil
+}
+
 // DoStream performs an HTTP request that returns a streaming response
 func (c *Client) DoStream(ctx context.Context, req Request) (*http.Response, error) {
 	// Build full URL

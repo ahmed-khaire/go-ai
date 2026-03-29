@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 
-	"github.com/digitallysavvy/go-ai/pkg/provider"
+	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
@@ -53,12 +55,16 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 // DoEmbed performs embedding generation for a single input
 func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	path := fmt.Sprintf("/models/%s", m.modelID)
-
 	reqBody := map[string]interface{}{
 		"inputs": input,
 	}
 
-	resp, err := m.provider.client.Post(ctx, path, reqBody)
+	resp, err := m.provider.client.Do(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    path,
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	})
 	if err != nil {
 		return nil, providererrors.NewProviderError("huggingface", 0, "", err.Error(), err)
 	}
@@ -81,6 +87,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 			InputTokens: totalTokens,
 			TotalTokens: totalTokens,
 		},
+		Response: types.EmbeddingResponse{Headers: map[string][]string(resp.Headers)},
 	}, nil
 }
 
@@ -90,14 +97,19 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 
 	var embeddings [][]float64
 	var totalTokens int
+	responses := make([]types.EmbeddingResponse, 0, len(inputs))
 
-	// Process each input
 	for _, input := range inputs {
 		reqBody := map[string]interface{}{
 			"inputs": input,
 		}
 
-		resp, err := m.provider.client.Post(ctx, path, reqBody)
+		resp, err := m.provider.client.Do(ctx, internalhttp.Request{
+			Method:  http.MethodPost,
+			Path:    path,
+			Body:    reqBody,
+			Headers: optsHeaders(opts),
+		})
 		if err != nil {
 			return nil, providererrors.NewProviderError("huggingface", 0, "", err.Error(), err)
 		}
@@ -112,8 +124,8 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 		}
 
 		embeddings = append(embeddings, embedding)
-		// HF doesn't return token counts, approximate
 		totalTokens += len(input) / 4
+		responses = append(responses, types.EmbeddingResponse{Headers: map[string][]string(resp.Headers)})
 	}
 
 	return &types.EmbeddingsResult{
@@ -122,6 +134,7 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 			InputTokens: totalTokens,
 			TotalTokens: totalTokens,
 		},
+		Responses: responses,
 	}, nil
 }
 
@@ -135,7 +148,6 @@ func (m *EmbeddingModel) parseEmbeddingResponse(body []byte) ([]float64, error) 
 	// Try parsing as array of arrays (some models return this)
 	var embeddings [][]float64
 	if err := json.Unmarshal(body, &embeddings); err == nil && len(embeddings) > 0 {
-		// Take the first embedding
 		return embeddings[0], nil
 	}
 
@@ -154,4 +166,12 @@ func (m *EmbeddingModel) parseEmbeddingResponse(body []byte) ([]float64, error) 
 	}
 
 	return nil, fmt.Errorf("unexpected response format from Hugging Face: %s", string(body))
+}
+
+// optsHeaders extracts the Headers map from EmbedModelOptions (nil-safe).
+func optsHeaders(opts *provider.EmbedModelOptions) map[string]string {
+	if opts == nil {
+		return nil
+	}
+	return opts.Headers
 }

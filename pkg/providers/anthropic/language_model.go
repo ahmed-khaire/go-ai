@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 
@@ -234,19 +235,19 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 		case types.ReasoningNone:
 			body["thinking"] = map[string]interface{}{"type": "disabled"}
 		case types.ReasoningMinimal:
-			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": 1024}
+			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": anthropicReasoningBudget(types.ReasoningMinimal, m.modelID)}
 			isThinking = true
 		case types.ReasoningLow:
-			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": 4000}
+			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": anthropicReasoningBudget(types.ReasoningLow, m.modelID)}
 			isThinking = true
 		case types.ReasoningMedium:
-			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": 10000}
+			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": anthropicReasoningBudget(types.ReasoningMedium, m.modelID)}
 			isThinking = true
 		case types.ReasoningHigh:
-			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": 16000}
+			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": anthropicReasoningBudget(types.ReasoningHigh, m.modelID)}
 			isThinking = true
 		case types.ReasoningXHigh:
-			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": 32000}
+			body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": anthropicReasoningBudget(types.ReasoningXHigh, m.modelID)}
 			isThinking = true
 		}
 	} else if m.options != nil && m.options.Thinking != nil {
@@ -829,6 +830,58 @@ func filterReasoningContent(messages []types.Message) []types.Message {
 // handleError converts various errors to provider errors
 func (m *LanguageModel) handleError(err error) error {
 	return providererrors.NewProviderError("anthropic", 0, "", err.Error(), err)
+}
+
+// anthropicMaxOutputTokens returns the maximum output tokens for a given Anthropic model.
+// Mirrors getModelCapabilities() in the TS SDK anthropic-messages-language-model.ts.
+func anthropicMaxOutputTokens(modelID string) int {
+	lower := strings.ToLower(modelID)
+	switch {
+	case strings.Contains(lower, "claude-sonnet-4-6") || strings.Contains(lower, "claude-opus-4-6"):
+		return 128000
+	case strings.Contains(lower, "claude-sonnet-4-5") || strings.Contains(lower, "claude-opus-4-5") || strings.Contains(lower, "claude-haiku-4-5"):
+		return 64000
+	case strings.Contains(lower, "claude-opus-4-1"):
+		return 32000
+	case strings.Contains(lower, "claude-sonnet-4-"):
+		return 64000
+	case strings.Contains(lower, "claude-opus-4-"):
+		return 32000
+	case strings.Contains(lower, "claude-3-haiku"):
+		return 4096
+	default:
+		return 4096
+	}
+}
+
+// anthropicReasoningBudget computes the budget_tokens for Anthropic's extended thinking
+// from a ReasoningLevel. Mirrors mapReasoningToProviderBudget in the TS SDK with
+// percentages 2/10/30/60/90% of the model's max output tokens, floored at 1024.
+func anthropicReasoningBudget(level types.ReasoningLevel, modelID string) int {
+	max := anthropicMaxOutputTokens(modelID)
+	var pct float64
+	switch level {
+	case types.ReasoningMinimal:
+		pct = 0.02
+	case types.ReasoningLow:
+		pct = 0.10
+	case types.ReasoningMedium:
+		pct = 0.30
+	case types.ReasoningHigh:
+		pct = 0.60
+	case types.ReasoningXHigh:
+		pct = 0.90
+	default:
+		pct = 0.30
+	}
+	budget := int(math.Round(float64(max) * pct))
+	if budget < 1024 {
+		budget = 1024
+	}
+	if budget > max {
+		budget = max
+	}
+	return budget
 }
 
 // anthropicContainerResponse represents container info returned in the Anthropic API response.

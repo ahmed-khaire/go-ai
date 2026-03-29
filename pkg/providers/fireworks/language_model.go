@@ -190,6 +190,9 @@ func (m *LanguageModel) convertResponse(response fireworksResponse) *types.Gener
 		Usage:        convertFireworksUsage(response.Usage),
 		RawResponse:  response,
 	}
+	if choice.Message.ReasoningContent != "" {
+		result.Content = append(result.Content, types.ReasoningContent{Text: choice.Message.ReasoningContent})
+	}
 	if len(choice.Message.ToolCalls) > 0 {
 		result.ToolCalls = make([]types.ToolCall, len(choice.Message.ToolCalls))
 		for i, tc := range choice.Message.ToolCalls {
@@ -282,9 +285,10 @@ type fireworksResponse struct {
 		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
 		Message      struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
 				ID       string `json:"id"`
 				Type     string `json:"type"`
 				Function struct {

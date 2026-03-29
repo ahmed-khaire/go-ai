@@ -51,21 +51,21 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 
 // DoEmbed generates an embedding for a single input
 func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
-	// Build request body
 	body := map[string]interface{}{
 		"value": input,
 	}
 
-	// Add headers
 	headers := m.getModelConfigHeaders()
-
-	// Add observability headers if in Vercel environment
 	o11y := GetO11yHeaders()
 	AddO11yHeaders(headers, o11y)
+	if opts != nil {
+		for k, v := range opts.Headers {
+			headers[k] = v
+		}
+	}
 
-	// Make API request
 	var result types.EmbeddingResult
-	err := m.provider.client.DoJSON(ctx, internalhttp.Request{
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
 		Method:  http.MethodPost,
 		Path:    "/embedding-model",
 		Body:    body,
@@ -74,27 +74,28 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 	if err != nil {
 		return nil, m.handleError(err)
 	}
+	result.Response = types.EmbeddingResponse{Headers: map[string][]string(httpResp.Headers)}
 
 	return &result, nil
 }
 
 // DoEmbedMany generates embeddings for multiple inputs
 func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
-	// Build request body
 	body := map[string]interface{}{
 		"values": inputs,
 	}
 
-	// Add headers
 	headers := m.getModelConfigHeaders()
-
-	// Add observability headers if in Vercel environment
 	o11y := GetO11yHeaders()
 	AddO11yHeaders(headers, o11y)
+	if opts != nil {
+		for k, v := range opts.Headers {
+			headers[k] = v
+		}
+	}
 
-	// Make API request
 	var result types.EmbeddingsResult
-	err := m.provider.client.DoJSON(ctx, internalhttp.Request{
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
 		Method:  http.MethodPost,
 		Path:    "/embedding-model",
 		Body:    body,
@@ -103,6 +104,7 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 	if err != nil {
 		return nil, m.handleError(err)
 	}
+	result.Responses = []types.EmbeddingResponse{{Headers: map[string][]string(httpResp.Headers)}}
 
 	return &result, nil
 }

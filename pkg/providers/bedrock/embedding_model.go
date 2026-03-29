@@ -124,6 +124,13 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
+	// Forward caller-supplied headers.
+	if opts != nil {
+		for k, v := range opts.Headers {
+			req.Header.Set(k, v)
+		}
+	}
+
 	// Sign the request with AWS Signature V4
 	signer := NewAWSSigner(
 		m.provider.config.AWSAccessKeyID,
@@ -193,6 +200,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 			InputTokens: inputTokens,
 			TotalTokens: inputTokens,
 		},
+		Response: types.EmbeddingResponse{Headers: map[string][]string(resp.Header)},
 	}, nil
 }
 
@@ -200,6 +208,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	var embeddings [][]float64
 	var totalTokens int
+	responses := make([]types.EmbeddingResponse, 0, len(inputs))
 
 	// Process each input individually
 	// Bedrock embeddings typically don't support batch processing
@@ -211,6 +220,7 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 
 		embeddings = append(embeddings, result.Embedding)
 		totalTokens += result.Usage.InputTokens
+		responses = append(responses, result.Response)
 	}
 
 	return &types.EmbeddingsResult{
@@ -219,5 +229,6 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 			InputTokens: totalTokens,
 			TotalTokens: totalTokens,
 		},
+		Responses: responses,
 	}, nil
 }

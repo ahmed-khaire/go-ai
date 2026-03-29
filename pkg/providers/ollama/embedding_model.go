@@ -2,9 +2,11 @@ package ollama
 
 import (
 	"context"
+	"net/http"
 
-	"github.com/digitallysavvy/go-ai/pkg/provider"
+	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
@@ -54,10 +56,14 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 	if err != nil {
 		return nil, err
 	}
-	return &types.EmbeddingResult{
+	r := &types.EmbeddingResult{
 		Embedding: result.Embeddings[0],
 		Usage:     result.Usage,
-	}, nil
+	}
+	if len(result.Responses) > 0 {
+		r.Response = result.Responses[0]
+	}
+	return r, nil
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
@@ -67,7 +73,12 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 		"model": m.modelID,
 	}
 	var response ollamaEmbedResponse
-	err := m.provider.client.PostJSON(ctx, "/v1/embeddings", reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    "/v1/embeddings",
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, providererrors.NewProviderError("ollama", 0, "", err.Error(), err)
 	}
@@ -81,7 +92,16 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 			InputTokens: response.Usage.PromptTokens,
 			TotalTokens: response.Usage.TotalTokens,
 		},
+		Responses: []types.EmbeddingResponse{{Headers: map[string][]string(httpResp.Headers)}},
 	}, nil
+}
+
+// optsHeaders extracts the Headers map from EmbedModelOptions (nil-safe).
+func optsHeaders(opts *provider.EmbedModelOptions) map[string]string {
+	if opts == nil {
+		return nil
+	}
+	return opts.Headers
 }
 
 type ollamaEmbedResponse struct {

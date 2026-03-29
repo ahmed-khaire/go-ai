@@ -740,7 +740,8 @@ func newXAIStream(reader io.ReadCloser, lastAssistantContent string) *xaiStream 
 	}
 	// Handle xAI's reasoning_content delta field, which carries reasoning text
 	// from Grok reasoning models as a top-level string on the delta object.
-	s.OnExtraDelta = func(data []byte) (*provider.StreamChunk, bool) {
+	// Use OnReasoningDelta so the shared stream manages reasoning-start/end blocks.
+	s.OnReasoningDelta = func(data []byte) (string, bool) {
 		var peek struct {
 			Choices []struct {
 				Delta struct {
@@ -750,13 +751,10 @@ func newXAIStream(reader io.ReadCloser, lastAssistantContent string) *xaiStream 
 		}
 		if json.Unmarshal(data, &peek) == nil && len(peek.Choices) > 0 {
 			if rc := peek.Choices[0].Delta.ReasoningContent; rc != "" {
-				return &provider.StreamChunk{
-					Type:      provider.ChunkTypeReasoning,
-					Reasoning: rc,
-				}, true
+				return rc, true
 			}
 		}
-		return nil, false
+		return "", false
 	}
 	// Handle top-level citations array in the last streaming chunk.
 	// Citations appear alongside finish_reason and are emitted as source chunks

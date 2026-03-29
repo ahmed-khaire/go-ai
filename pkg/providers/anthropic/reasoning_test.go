@@ -29,8 +29,9 @@ func TestAnthropicReasoningMedium(t *testing.T) {
 	if thinking["type"] != "enabled" {
 		t.Errorf("expected thinking type 'enabled', got: %v", thinking["type"])
 	}
-	if thinking["budget_tokens"] != 10000 {
-		t.Errorf("expected budget_tokens 10000, got: %v", thinking["budget_tokens"])
+	// claude-sonnet-4-6 has maxOutputTokens=128000; medium=30% → 38400
+	if thinking["budget_tokens"] != 38400 {
+		t.Errorf("expected budget_tokens 38400, got: %v", thinking["budget_tokens"])
 	}
 }
 
@@ -84,11 +85,12 @@ func TestAnthropicReasoningAllLevels(t *testing.T) {
 		wantBudget    interface{}
 		hasBudget     bool
 	}{
-		{types.ReasoningMinimal, "enabled", 1024, true},
-		{types.ReasoningLow, "enabled", 4000, true},
-		{types.ReasoningMedium, "enabled", 10000, true},
-		{types.ReasoningHigh, "enabled", 16000, true},
-		{types.ReasoningXHigh, "enabled", 32000, true},
+		// claude-sonnet-4-6 → maxOutputTokens=128000; budgets at 2/10/30/60/90%
+		{types.ReasoningMinimal, "enabled", 2560, true},
+		{types.ReasoningLow, "enabled", 12800, true},
+		{types.ReasoningMedium, "enabled", 38400, true},
+		{types.ReasoningHigh, "enabled", 76800, true},
+		{types.ReasoningXHigh, "enabled", 115200, true},
 		{types.ReasoningNone, "disabled", nil, false},
 	}
 
@@ -136,8 +138,9 @@ func TestAnthropicReasoningOverridesModelOption(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected 'thinking' field, got: %v", body["thinking"])
 	}
-	if thinking["budget_tokens"] != 10000 {
-		t.Errorf("expected call-level budget_tokens 10000, got: %v", thinking["budget_tokens"])
+	// claude-sonnet-4-6 → maxOutputTokens=128000; medium=30% → 38400
+	if thinking["budget_tokens"] != 38400 {
+		t.Errorf("expected call-level budget_tokens 38400, got: %v", thinking["budget_tokens"])
 	}
 }
 
