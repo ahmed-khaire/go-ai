@@ -206,6 +206,41 @@ func TestCacheControlStructure(t *testing.T) {
 	}
 }
 
+// TestAlibabaSingleItemContentArrayCacheControl verifies that a user message with
+// exactly one content part preserves the array structure (not flattened to string)
+// when a cache control validator is active, and that cache_control is applied.
+func TestAlibabaSingleItemContentArrayCacheControl(t *testing.T) {
+	validator := NewCacheControlValidator()
+	msgs := []types.Message{
+		{
+			Role:    types.RoleUser,
+			Content: []types.ContentPart{types.TextContent{Text: "single item"}},
+		},
+	}
+
+	result := ConvertToAlibabaChatMessages(msgs, validator)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	msg := result[0]
+
+	// Must be an array (not a string) so cache_control can be attached.
+	contentArr, ok := msg["content"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("single-item user message with cache control must serialize as array, got %T", msg["content"])
+	}
+	if len(contentArr) != 1 {
+		t.Fatalf("expected 1 content part in array, got %d", len(contentArr))
+	}
+	if contentArr[0]["cache_control"] == nil {
+		t.Error("expected cache_control on single-item user content, got nil")
+	}
+	if contentArr[0]["text"] != "single item" {
+		t.Errorf("text = %q, want %q", contentArr[0]["text"], "single item")
+	}
+}
+
 // TestBuildRequestBodyWithCacheControl verifies that buildRequestBody applies
 // cache control when specified in provider options.
 func TestBuildRequestBodyWithCacheControl(t *testing.T) {
