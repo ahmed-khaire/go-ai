@@ -5,7 +5,7 @@ description: Setup and usage guide for xAI Grok models with Go-AI SDK
 
 # xAI Provider
 
-xAI provides Grok models with real-time knowledge through X (Twitter) integration. Known for witty personality, current events awareness, and strong reasoning capabilities.
+xAI provides Grok models with real-time knowledge through X (Twitter) integration, image/video generation, and strong reasoning capabilities.
 
 ## Setup
 
@@ -14,25 +14,25 @@ xAI provides Grok models with real-time knowledge through X (Twitter) integratio
 ```go
 import (
     "github.com/digitallysavvy/go-ai/pkg/ai"
-    "github.com/digitallysavvy/go-ai/pkg/providers/openai" // xAI uses OpenAI-compatible API
+    "github.com/digitallysavvy/go-ai/pkg/providers/xai"
 )
 ```
 
 ### Configuration
 
 ```go
-provider := openai.New(openai.Config{
-    APIKey:  os.Getenv("XAI_API_KEY"),
-    BaseURL: "https://api.x.ai/v1",
+provider := xai.New(xai.Config{
+    APIKey: os.Getenv("XAI_API_KEY"),
 })
 
-model, err := provider.LanguageModel("grok-2-latest")
-if err != nil {
-    log.Fatal(err)
-}
+// Default: Responses API (recommended)
+model, err := provider.LanguageModel("grok-3")
+
+// Opt-in: Chat Completions API (legacy)
+chatModel, err := provider.ChatCompletionsLanguageModel("grok-3")
 ```
 
-### Get API Key
+### Get API key
 
 1. Sign up at [x.ai](https://x.ai)
 2. Request API access
@@ -42,132 +42,115 @@ if err != nil {
 export XAI_API_KEY=xai-...
 ```
 
-## Available Models
+## Available models
 
-### Language Models
+### Language models
 
-| Model ID | Context | Input Price | Output Price | Best For |
-|----------|---------|-------------|--------------|----------|
-| grok-2-latest | 131K | $2.00/1M | $10.00/1M | Latest capabilities |
-| grok-2-1212 | 131K | $2.00/1M | $10.00/1M | Stable version |
-| grok-2-vision-1212 | 32K | $2.00/1M | $10.00/1M | Image understanding |
-| grok-beta | 131K | $5.00/1M | $15.00/1M | Beta features |
+| Model ID | Description |
+|----------|-------------|
+| `grok-3` | Latest Grok 3 model |
+| `grok-3-latest` | Alias for latest Grok 3 |
+| `grok-3-mini` | Smaller, faster Grok 3 variant |
+| `grok-4` | Latest Grok 4 model |
+| `grok-4-latest` | Alias for latest Grok 4 |
 
-## Provider-Specific Features
+### Image models
 
-### Real-Time X Integration
+| Model ID | Description |
+|----------|-------------|
+| `grok-2-image` | Image generation |
+| `grok-2-image-1212` | Stable image generation version |
 
-Access current events and trending topics:
+### Video models
+
+| Model ID | Description |
+|----------|-------------|
+| `grok-video` | Video generation |
+
+## Responses API (default)
+
+Starting in v0.4.0, `LanguageModel()` returns a Responses API model. This is the recommended API for new development. Use `ChatCompletionsLanguageModel()` if you need the legacy Chat Completions API.
 
 ```go
-result, err := ai.GenerateText(model,
-    "What are the trending topics on X today?",
-    ai.WithWebSearch(true), // Enable real-time X data
-)
+model, _ := provider.LanguageModel("grok-3")
+
+result, _ := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "What's happening in AI today?",
+})
 ```
 
-### Vision Capabilities
+## Provider options
+
+### Reasoning summary
+
+Control reasoning output in Responses API:
 
 ```go
-result, err := ai.GenerateText(model,
-    ai.WithMessages(
-        ai.UserMessage("Describe this meme",
-            ai.WithImageURL("https://example.com/meme.jpg"),
-        ),
-    ),
-)
-```
-
-### Tool Use
-
-```go
-searchTool := ai.Tool{
-    Type: "function",
-    Function: ai.FunctionDefinition{
-        Name: "search_x",
-        Description: "Search X posts",
-        Parameters: map[string]interface{}{
-            "type": "object",
-            "properties": map[string]interface{}{
-                "query": map[string]string{"type": "string"},
-            },
+result, _ := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "Explain quantum computing",
+    ProviderOptions: map[string]interface{}{
+        "xai": map[string]interface{}{
+            "reasoningSummary": "detailed", // "auto", "concise", or "detailed"
         },
     },
-}
-
-result, err := ai.GenerateText(model,
-    "Find recent AI discussions",
-    ai.WithTools(searchTool),
-)
+})
 ```
 
-## Examples
-
-### Basic Text Generation
+### Logprobs
 
 ```go
-package main
-
-import (
-    "fmt"
-    "log"
-    "os"
-
-    "github.com/digitallysavvy/go-ai/pkg/ai"
-    "github.com/digitallysavvy/go-ai/pkg/providers/openai"
-)
-
-func main() {
-    provider := openai.New(openai.Config{
-        APIKey:  os.Getenv("XAI_API_KEY"),
-        BaseURL: "https://api.x.ai/v1",
-    })
-
-    model, err := provider.LanguageModel("grok-2-latest")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    result, err := ai.GenerateText(model,
-        "What's happening in AI today?")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Println(result.Text)
-}
+result, _ := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "Hello",
+    ProviderOptions: map[string]interface{}{
+        "xai": map[string]interface{}{
+            "logprobs":    true,
+            "topLogprobs": 5,
+        },
+    },
+})
 ```
 
-### Current Events Analysis
+## Image generation
 
 ```go
-result, err := ai.GenerateText(model,
-    "Analyze today's tech news and give me key insights",
-    ai.WithWebSearch(true),
-)
+imageModel, _ := provider.ImageModel("grok-2-image")
+
+result, _ := ai.GenerateImage(ctx, ai.GenerateImageOptions{
+    Model:  imageModel,
+    Prompt: "A futuristic cityscape at sunset",
+    ProviderOptions: map[string]interface{}{
+        "xai": map[string]interface{}{
+            "quality": "high",  // "low", "medium", "high"
+        },
+    },
+})
 ```
 
-## Best Practices
+Supports multiple input images for editing, b64_json output format, and `CostInUsdTicks` in provider metadata.
 
-1. **Leverage Real-Time Data**
-   - Use for current events queries
-   - Enable web search for latest information
-   - Great for social media analysis
+## Video generation
 
-2. **Personality**
-   - Grok has witty, informal tone
-   - Good for creative, conversational tasks
-   - May include humor in responses
+```go
+videoModel, _ := provider.VideoModel("grok-video")
 
-## Rate Limits & Pricing
+result, _ := ai.GenerateVideo(ctx, ai.GenerateVideoOptions{
+    Model:  videoModel,
+    Prompt: "A cat playing piano",
+})
+```
 
-### Rate Limits
+Returns `ModerationError` if content is filtered. `CostInUsdTicks` available in provider metadata.
 
-| Model | RPM | Tokens/Min |
-|-------|-----|------------|
-| Grok-2 | 60 | 60,000 |
+## Best practices
 
-## See Also
+1. **Use the Responses API** — it is the default and recommended path
+2. **Leverage ReasoningSummary** — get insight into model reasoning without full chain-of-thought overhead
+3. **Check CostInUsdTicks** — available in image and video provider metadata for cost tracking
+
+## See also
 
 - [API Reference: GenerateText](../07-reference/ai/generate-text.mdx)
 - [xAI Documentation](https://docs.x.ai)
