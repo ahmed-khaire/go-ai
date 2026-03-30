@@ -233,6 +233,11 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 			if storeExplicit {
 				body["store"] = store
 			}
+			// textVerbosity controls the length/detail of the model's text response.
+			// Maps to top-level "verbosity" in the Chat Completions API.
+			if v, ok := openaiOpts["textVerbosity"].(string); ok {
+				body["verbosity"] = v
+			}
 		}
 	}
 

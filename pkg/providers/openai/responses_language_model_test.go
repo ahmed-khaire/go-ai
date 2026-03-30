@@ -366,6 +366,107 @@ func TestResponsesLanguageModel_PreviousResponseId(t *testing.T) {
 	}
 }
 
+// TestResponsesLanguageModel_TextVerbosity verifies that textVerbosity is mapped
+// to text.verbosity in the Responses API request body.
+func TestResponsesLanguageModel_TextVerbosity(t *testing.T) {
+	p := New(Config{APIKey: "test-key"})
+	model := NewResponsesLanguageModel(p, "gpt-5-mini")
+
+	tests := []struct {
+		name      string
+		verbosity string
+	}{
+		{"low", "low"},
+		{"medium", "medium"},
+		{"high", "high"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, _, err := model.buildRequestBody(&provider.GenerateOptions{
+				Prompt: types.Prompt{
+					Messages: []types.Message{
+						{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "hi"}}},
+					},
+				},
+				ProviderOptions: map[string]interface{}{
+					"openai": map[string]interface{}{"textVerbosity": tt.verbosity},
+				},
+			}, false)
+			if err != nil {
+				t.Fatalf("buildRequestBody failed: %v", err)
+			}
+
+			textObj, ok := body["text"].(map[string]interface{})
+			if !ok {
+				t.Fatal("expected text object in body")
+			}
+			v, ok := textObj["verbosity"].(string)
+			if !ok {
+				t.Fatalf("expected verbosity in text object, got %v", textObj)
+			}
+			if v != tt.verbosity {
+				t.Errorf("text.verbosity = %q, want %q", v, tt.verbosity)
+			}
+		})
+	}
+}
+
+// TestResponsesLanguageModel_TextVerbosityWithFormat verifies that textVerbosity
+// and responseFormat coexist correctly in the text object.
+func TestResponsesLanguageModel_TextVerbosityWithFormat(t *testing.T) {
+	p := New(Config{APIKey: "test-key"})
+	model := NewResponsesLanguageModel(p, "gpt-5-mini")
+
+	body, _, err := model.buildRequestBody(&provider.GenerateOptions{
+		Prompt: types.Prompt{
+			Messages: []types.Message{
+				{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "hi"}}},
+			},
+		},
+		ResponseFormat: &provider.ResponseFormat{Type: "json"},
+		ProviderOptions: map[string]interface{}{
+			"openai": map[string]interface{}{"textVerbosity": "low"},
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("buildRequestBody failed: %v", err)
+	}
+
+	textObj, ok := body["text"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected text object in body")
+	}
+	if textObj["verbosity"] != "low" {
+		t.Errorf("text.verbosity = %v, want %q", textObj["verbosity"], "low")
+	}
+	if _, ok := textObj["format"]; !ok {
+		t.Error("expected format in text object when responseFormat is set")
+	}
+}
+
+// TestResponsesLanguageModel_NoTextVerbosity verifies that the text object is not
+// present when neither textVerbosity nor responseFormat is set.
+func TestResponsesLanguageModel_NoTextVerbosity(t *testing.T) {
+	p := New(Config{APIKey: "test-key"})
+	model := NewResponsesLanguageModel(p, "gpt-5-mini")
+
+	body, _, err := model.buildRequestBody(&provider.GenerateOptions{
+		Prompt: types.Prompt{
+			Messages: []types.Message{
+				{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "hi"}}},
+			},
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("buildRequestBody failed: %v", err)
+	}
+
+	if _, ok := body["text"]; ok {
+		t.Error("expected no text object when textVerbosity and responseFormat are not set")
+	}
+}
+
 // TestResponsesModel_Factory verifies the provider factory creates a valid model.
 func TestResponsesModel_Factory(t *testing.T) {
 	p := New(Config{APIKey: "test-key"})

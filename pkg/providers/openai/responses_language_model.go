@@ -98,6 +98,7 @@ func (m *ResponsesLanguageModel) buildRequestBody(opts *provider.GenerateOptions
 	promptCacheRetention := ""
 	reasoningEffort := ""
 	reasoningSummary := ""
+	textVerbosity := ""
 	serviceTier := ""
 	user := ""
 	maxToolCalls := 0
@@ -122,6 +123,9 @@ func (m *ResponsesLanguageModel) buildRequestBody(opts *provider.GenerateOptions
 			}
 			if v, ok := openaiOpts["reasoningSummary"].(string); ok {
 				reasoningSummary = v
+			}
+			if v, ok := openaiOpts["textVerbosity"].(string); ok {
+				textVerbosity = v
 			}
 			if v, ok := openaiOpts["serviceTier"].(string); ok {
 				serviceTier = v
@@ -207,13 +211,20 @@ func (m *ResponsesLanguageModel) buildRequestBody(opts *provider.GenerateOptions
 		body["max_output_tokens"] = *opts.MaxTokens
 	}
 
-	// Response format (JSON schema / structured output).
-	if opts.ResponseFormat != nil && opts.ResponseFormat.Type != "" {
-		body["text"] = map[string]interface{}{
-			"format": map[string]interface{}{
+	// Response format and/or text verbosity → "text" object.
+	// The text object is created when either a response format or textVerbosity is set.
+	hasFormat := opts.ResponseFormat != nil && opts.ResponseFormat.Type != ""
+	if hasFormat || textVerbosity != "" {
+		textObj := map[string]interface{}{}
+		if hasFormat {
+			textObj["format"] = map[string]interface{}{
 				"type": opts.ResponseFormat.Type,
-			},
+			}
 		}
+		if textVerbosity != "" {
+			textObj["verbosity"] = textVerbosity
+		}
+		body["text"] = textObj
 	}
 
 	// Tools.

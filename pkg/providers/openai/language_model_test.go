@@ -1034,3 +1034,67 @@ func TestStoreOffDropsUnencryptedReasoning(t *testing.T) {
 		}
 	})
 }
+
+// TestTextVerbosityChatCompletions verifies that textVerbosity is mapped to the
+// top-level "verbosity" field in Chat Completions request bodies.
+func TestTextVerbosityChatCompletions(t *testing.T) {
+	p := New(Config{APIKey: "test-key"})
+	model := NewLanguageModel(p, "gpt-5-mini")
+
+	tests := []struct {
+		name      string
+		verbosity string
+	}{
+		{"low verbosity", "low"},
+		{"medium verbosity", "medium"},
+		{"high verbosity", "high"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &provider.GenerateOptions{
+				Prompt: types.Prompt{
+					Messages: []types.Message{
+						{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "Hello"}}},
+					},
+				},
+				ProviderOptions: map[string]interface{}{
+					"openai": map[string]interface{}{
+						"textVerbosity": tt.verbosity,
+					},
+				},
+			}
+
+			body := model.buildRequestBody(opts, false)
+
+			v, ok := body["verbosity"].(string)
+			if !ok {
+				t.Fatalf("expected verbosity in body, got %v", body["verbosity"])
+			}
+			if v != tt.verbosity {
+				t.Errorf("verbosity = %q, want %q", v, tt.verbosity)
+			}
+		})
+	}
+}
+
+// TestTextVerbosityOmittedWhenNotSet verifies that verbosity is not present
+// when textVerbosity is not set.
+func TestTextVerbosityOmittedWhenNotSet(t *testing.T) {
+	p := New(Config{APIKey: "test-key"})
+	model := NewLanguageModel(p, "gpt-5-mini")
+
+	opts := &provider.GenerateOptions{
+		Prompt: types.Prompt{
+			Messages: []types.Message{
+				{Role: types.RoleUser, Content: []types.ContentPart{types.TextContent{Text: "Hello"}}},
+			},
+		},
+	}
+
+	body := model.buildRequestBody(opts, false)
+
+	if _, ok := body["verbosity"]; ok {
+		t.Errorf("expected no verbosity when textVerbosity not set")
+	}
+}
