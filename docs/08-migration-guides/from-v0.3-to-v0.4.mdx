@@ -212,7 +212,7 @@ func main() {
 }
 ```
 
-If you were not passing a custom `Tracer` and relied on the default global tracer, no changes are needed. The `OTelTelemetryIntegration` is registered globally by default and uses `trace.GetTracer("ai")` when no custom tracer is provided.
+If you were not passing a custom `Tracer` and relied on the default global tracer, no changes are needed. The `OTelTelemetryIntegration` is registered globally by default and uses `otel.Tracer("ai-sdk")` when no custom tracer is provided.
 
 The global registry supports multiple integrations via `AddTelemetryIntegration()` for fan-out to multiple backends. Use `ClearTelemetryIntegrations()` to reset, or pass `telemetry.NoopTelemetryIntegration{}` to `RegisterTelemetryIntegration()` to disable telemetry.
 
@@ -223,7 +223,6 @@ The global registry supports multiple integrations via `AddTelemetryIntegration(
 - [ ] Replace `xai.Provider.LanguageModel()` with `ChatCompletionsLanguageModel()` if you need Chat Completions API
 - [ ] Replace `grok-2` and `grok-2-vision-1212` with `grok-3` family models
 - [ ] Add `Config: mcp.TransportConfig{Redirect: mcp.MCPRedirectFollow}` to MCP transport configs that need redirects
-- [ ] Move custom `Tracer` setup to `telemetry.RegisterTelemetryIntegration()` at startup
 - [ ] Move custom `Tracer` setup to `telemetry.RegisterTelemetryIntegration()` at startup (the `Tracer` field still works for backward compatibility but is deprecated)
 
 ### Testing

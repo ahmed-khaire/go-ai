@@ -195,7 +195,7 @@ result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
     Tools:    tools,
     MaxSteps: 5,
     Prompt:   "What's the weather in multiple cities?",
-    OnStepFinish: func(step types.Step) {
+    OnStepFinish: func(ctx context.Context, step types.StepResult, userContext interface{}) {
         // Your own logic, e.g. for saving the chat history or recording usage
         fmt.Printf("Step %d finished\n", step.StepNumber)
         fmt.Printf("  Text: %s\n", step.Text)
@@ -232,8 +232,11 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Add the response messages to your conversation history
-messages = append(messages, result.Response.Messages...)
+// Add the response messages from the last step to your conversation history
+if len(result.Steps) > 0 {
+    lastStep := result.Steps[len(result.Steps)-1]
+    messages = append(messages, lastStep.ResponseMessages...)
+}
 
 // Continue the conversation
 result2, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
@@ -251,7 +254,7 @@ You can use the `ToolChoice` setting to influence when a tool is selected. It su
 - `auto` (default): the model can choose whether and which tools to call
 - `required`: the model must call a tool. It can choose which tool to call
 - `none`: the model must not call tools
-- `specific`: the model must call the specified tool
+- `tool`: the model must call the specified tool
 
 ```go
 // Auto: Let the model decide (default)
@@ -283,7 +286,7 @@ result, _ := ai.GenerateText(ctx, ai.GenerateTextOptions{
     Model: model,
     Tools: []types.Tool{weatherTool, calculatorTool},
     ToolChoice: types.ToolChoice{
-        Type:     "specific",
+        Type:     "tool",
         ToolName: "weather",
     },
     Prompt: "What's the weather?",
@@ -810,18 +813,20 @@ func (e *ParallelToolExecutor) ExecuteTools(
             tool, ok := tools[tc.ToolName]
             if !ok {
                 results[idx] = types.ToolResult{
-                    ToolCallID: tc.ToolCallID,
+                    ToolCallID: tc.ID,
                     ToolName:   tc.ToolName,
                     Error:      fmt.Errorf("tool not found: %s", tc.ToolName),
                 }
                 return
             }
 
-            output, err := tool.Execute(ctx, tc.Input)
+            output, err := tool.Execute(ctx, tc.Arguments, types.ToolExecutionOptions{
+                ToolCallID: tc.ID,
+            })
             results[idx] = types.ToolResult{
-                ToolCallID: tc.ToolCallID,
+                ToolCallID: tc.ID,
                 ToolName:   tc.ToolName,
-                Output:     output,
+                Result:     output,
                 Error:      err,
             }
         }(i, toolCall)
@@ -866,7 +871,7 @@ result, _ := ai.GenerateText(ctx, ai.GenerateTextOptions{
     Tools: []types.Tool{searchTool, summarizeTool, translateTool},
     Prompt: "Search for AI news, summarize it, then translate to Spanish",
     MaxSteps: 10,
-    OnStepFinish: func(step types.Step) {
+    OnStepFinish: func(ctx context.Context, step types.StepResult, userContext interface{}) {
         fmt.Printf("Step %d: Used %d tools\n", step.StepNumber, len(step.ToolCalls))
     },
 })
