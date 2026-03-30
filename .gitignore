@@ -58,6 +58,14 @@ go.work.sum
 .DS_Store
 coverage.out
 
+# Example compiled binaries
+examples/*/[a-z]*[!.]*
+!examples/*/main.go
+!examples/*/go.mod
+!examples/*/go.sum
+!examples/*/*.go
+!examples/*/*.md
+
 # Claude Code project files
 CLAUDE.md
 VERIFICATION_PLAN.md
