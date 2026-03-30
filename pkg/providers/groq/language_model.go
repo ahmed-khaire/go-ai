@@ -172,7 +172,7 @@ func (m *LanguageModel) convertResponse(response groqResponse) *types.GenerateRe
 		for i, tc := range choice.Message.ToolCalls {
 			var args map[string]interface{}
 			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
 			}
 			result.ToolCalls[i] = types.ToolCall{
 				ID:        tc.ID,
@@ -472,7 +472,7 @@ func (s *groqStream) flushGroqToolCalls(finishReason string) {
 		}
 		var args map[string]interface{}
 		if accum.arguments != "" {
-			json.Unmarshal([]byte(accum.arguments), &args)
+			_ = json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
 		}
 		s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
 			Type: provider.ChunkTypeToolCall,

@@ -14,7 +14,7 @@ func TestPerplexityReasoningWarning(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"test","model":"sonar","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
+		_, _ = w.Write([]byte(`{"id":"test","model":"sonar","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
 	}))
 	defer srv.Close()
 
@@ -47,7 +47,7 @@ func TestPerplexityNoWarningWhenReasoningNil(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"test","model":"sonar","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
+		_, _ = w.Write([]byte(`{"id":"test","model":"sonar","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
 	}))
 	defer srv.Close()
 
@@ -73,7 +73,7 @@ func TestPerplexityCostInMetadata(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		// Cost is a nested object under usage.cost (matches real Perplexity API).
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id":"test","model":"sonar",
 			"choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],
 			"usage":{
@@ -147,7 +147,7 @@ func TestPerplexityMetadataAlwaysPresent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"test","model":"sonar","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
+		_, _ = w.Write([]byte(`{"id":"test","model":"sonar","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
 	}))
 	defer srv.Close()
 
@@ -182,7 +182,7 @@ func TestPerplexityImagesInMetadata(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id":"test","model":"sonar",
 			"choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hi"}}],
 			"images":[{"image_url":"https://img.example.com/a.jpg","origin_url":"https://example.com/a","height":100,"width":200}],

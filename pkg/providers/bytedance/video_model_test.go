@@ -1026,13 +1026,13 @@ func TestError_NoVideoURL(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "no-video-task-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "no-video-task-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/no-video-task-id", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// succeeded but no video_url
-		fmt.Fprintln(w, `{"id": "no-video-task-id", "status": "succeeded", "content": {}}`)
+		_, _ = fmt.Fprintln(w, `{"id": "no-video-task-id", "status": "succeeded", "content": {}}`)
 	})
 
 	server := httptest.NewServer(mux)

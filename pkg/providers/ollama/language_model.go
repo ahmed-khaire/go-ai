@@ -151,7 +151,7 @@ func (m *LanguageModel) convertResponse(response ollamaResponse) *types.Generate
 		for i, tc := range choice.Message.ToolCalls {
 			var args map[string]interface{}
 			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
 			}
 			result.ToolCalls[i] = types.ToolCall{
 				ID:        tc.ID,

@@ -199,9 +199,9 @@ func TestDoGenerateAsync_MultiPollSuccess(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch idx {
 			case 0:
-				fmt.Fprintf(w, `{"id": %q, "status": "Pending", "result": null}`, requestID)
+				_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Pending", "result": null}`, requestID)
 			case 1:
-				fmt.Fprintf(w, `{"id": %q, "status": "Running", "result": null}`, requestID)
+				_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Running", "result": null}`, requestID)
 			default:
 				imageURL := ts.server.URL + "/fake-image"
 				_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)

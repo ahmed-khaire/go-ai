@@ -197,7 +197,7 @@ func (m *ImageModel) downloadImage(ctx context.Context, imageURL string) (*types
 	if err != nil {
 		return nil, fmt.Errorf("Fireworks failed to download image: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Fireworks image download returned status %d", resp.StatusCode)
