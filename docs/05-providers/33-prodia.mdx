@@ -1,0 +1,232 @@
+---
+title: Prodia Provider
+description: Setup and usage guide for Prodia image and video generation with the Go AI SDK.
+---
+
+# Prodia Provider
+
+[Prodia](https://prodia.com/) is a fast inference platform for generative AI, offering high-speed image generation with FLUX and Stable Diffusion models, plus video generation with Wan 2.2 Lightning models.
+
+## Setup
+
+### Installation
+
+```go
+import (
+    "github.com/digitallysavvy/go-ai/pkg/providers/prodia"
+)
+```
+
+### Configuration
+
+```go
+provider := prodia.New(prodia.Config{
+    APIKey: os.Getenv("PRODIA_TOKEN"),
+})
+```
+
+You can use the following optional settings to customize the Prodia provider instance:
+
+- **APIKey** `string` — API key sent as a Bearer token in the `Authorization` header. Defaults to the `PRODIA_TOKEN` environment variable.
+- **BaseURL** `string` — Custom URL prefix for API calls. Defaults to `https://inference.prodia.com/v2`.
+- **Headers** `map[string]string` — Custom headers to include in all requests.
+
+### Get API keys
+
+1. Sign up at [prodia.com](https://prodia.com)
+2. Navigate to your API settings
+3. Generate an API token
+4. Set the environment variable:
+
+```bash
+export PRODIA_TOKEN=your-api-key
+```
+
+## Image model
+
+Prodia's image model handles text-to-image and image-to-image generation. You create an image model using the `ImageModel()` factory method.
+
+### Basic usage
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "github.com/digitallysavvy/go-ai/pkg/provider"
+    "github.com/digitallysavvy/go-ai/pkg/providers/prodia"
+)
+
+func main() {
+    prov := prodia.New(prodia.Config{})
+
+    model, err := prov.ImageModel("inference.flux-fast.schnell.txt2img.v2")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    result, err := model.DoGenerate(context.Background(), &provider.ImageGenerateOptions{
+        Prompt: "A cat wearing an intricate robe",
+        Size:   "1024x1024",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("Generated image: %d bytes, type: %s\n", len(result.Image), result.MimeType)
+}
+```
+
+### Model capabilities
+
+| Model ID | Description |
+|----------|-------------|
+| `inference.flux-fast.schnell.txt2img.v2` | Fast FLUX Schnell model for text-to-image generation |
+| `inference.flux.schnell.txt2img.v2` | FLUX Schnell model for text-to-image generation |
+
+> **Note:** Prodia supports additional model IDs. Check the [Prodia documentation](https://docs.prodia.com/) for the full list of available models.
+
+## Language model
+
+Prodia's language model handles img2img generation via multipart form-data. It accepts a text prompt and an optional input image and returns a transformed image along with an optional text description.
+
+```go
+model, err := prov.LanguageModel("inference.nano-banana.img2img.v2")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Video model
+
+Prodia supports text-to-video and image-to-video generation with Wan 2.2 Lightning models.
+
+```go
+model, err := prov.VideoModel("inference.wan2-2.lightning.txt2vid.v0")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Video model IDs
+
+| Model ID | Type | Description |
+|----------|------|-------------|
+| `inference.wan2-2.lightning.txt2vid.v0` | T2V | Text-to-video generation |
+| `inference.wan2-2.lightning.img2vid.v0` | I2V | Image-to-video generation |
+
+## Image size
+
+You can specify the image size using the `Size` field in `WIDTHxHEIGHT` format. Width and height must be between 256 and 1920 pixels.
+
+```go
+result, err := model.DoGenerate(ctx, &provider.ImageGenerateOptions{
+    Prompt: "A serene mountain landscape at sunset",
+    Size:   "1024x768",
+})
+```
+
+## Provider options
+
+Prodia image models support additional options through the `ProviderOptions` map under the `"prodia"` key:
+
+```go
+steps := 4
+stylePreset := "cinematic"
+
+result, err := model.DoGenerate(ctx, &provider.ImageGenerateOptions{
+    Prompt: "A cat wearing an intricate robe",
+    Size:   "1024x768",
+    ProviderOptions: map[string]interface{}{
+        "prodia": map[string]interface{}{
+            "steps":       steps,
+            "stylePreset": stylePreset,
+        },
+    },
+})
+```
+
+### Image model options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `steps` | `int` | Number of computational iterations (1-4). More steps produce higher quality results. |
+| `width` | `int` | Output width in pixels (256-1920). Overrides width from `Size`. |
+| `height` | `int` | Output height in pixels (256-1920). Overrides height from `Size`. |
+| `stylePreset` | `string` | Visual theme for the output image (see style presets below). |
+| `loras` | `[]string` | Up to 3 LoRA model references for output augmentation. |
+| `progressive` | `bool` | Return a progressive JPEG when using JPEG output. |
+
+### Style presets
+
+Supported values: `3d-model`, `analog-film`, `anime`, `cinematic`, `comic-book`, `digital-art`, `enhance`, `fantasy-art`, `isometric`, `line-art`, `low-poly`, `neon-punk`, `origami`, `photographic`, `pixel-art`, `texture`, `craft-clay`.
+
+### Language and video model options
+
+| Option | Type | Applies to | Description |
+|--------|------|------------|-------------|
+| `aspectRatio` | `string` | Language, Video | One of: `1:1`, `2:3`, `3:2`, `4:5`, `5:4`, `4:7`, `7:4`, `9:16`, `16:9`, `9:21`, `21:9` |
+| `resolution` | `string` | Video only | Output resolution (e.g. `"480p"`, `"720p"`) |
+
+## Seed
+
+You can use the `Seed` parameter to get reproducible results:
+
+```go
+seed := 12345
+
+result, err := model.DoGenerate(ctx, &provider.ImageGenerateOptions{
+    Prompt: "A serene mountain landscape at sunset",
+    Seed:   &seed,
+})
+```
+
+The seed used for generation is available in the provider metadata (see below), which is useful when you do not set a specific seed and want to reproduce a result later.
+
+## Provider metadata
+
+The response includes provider-specific metadata in `ProviderMetadata["prodia"]`. The nesting depends on the model type:
+
+- **Image models**: metadata is nested under `"images"` as a slice — `ProviderMetadata["prodia"]["images"][0]`
+- **Video models**: metadata is nested under `"videos"` as a slice — `ProviderMetadata["prodia"]["videos"][0]`
+- **Language models**: metadata is flat — `ProviderMetadata["prodia"]` directly contains the fields
+
+Each metadata object may contain:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jobId` | `string` | Unique identifier for the generation job |
+| `seed` | `float64` | Seed used for generation (useful for reproducing results) |
+| `elapsed` | `float64` | Generation time in seconds |
+| `iterationsPerSecond` | `float64` | Processing speed metric |
+| `createdAt` | `string` | Timestamp when the job was created |
+| `updatedAt` | `string` | Timestamp when the job was last updated |
+| `dollars` | `float64` | Cost of the generation in USD |
+
+```go
+result, err := model.DoGenerate(ctx, &provider.ImageGenerateOptions{
+    Prompt: "A serene mountain landscape at sunset",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+// Access provider metadata
+if prodiaMeta, ok := result.ProviderMetadata["prodia"].(map[string]interface{}); ok {
+    if images, ok := prodiaMeta["images"].([]interface{}); ok && len(images) > 0 {
+        if img, ok := images[0].(map[string]interface{}); ok {
+            fmt.Println("Job ID:", img["jobId"])
+            fmt.Println("Seed:", img["seed"])
+            fmt.Println("Elapsed:", img["elapsed"])
+        }
+    }
+}
+```
+
+## See also
+
+- [Provider options](../02-foundations/06-provider-options.mdx) — how to pass provider-specific configuration
+- [KlingAI provider](./29-klingai.mdx) — another video generation provider
+- [Prodia documentation](https://docs.prodia.com/)

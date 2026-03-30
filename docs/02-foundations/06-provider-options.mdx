@@ -1,0 +1,372 @@
+---
+title: Provider options
+description: Learn how to pass provider-specific configuration in the Go AI SDK.
+---
+
+# Provider options
+
+`ProviderOptions` lets you pass provider-specific configuration that goes beyond standard settings like `Temperature` and `MaxTokens`. Options are namespaced by provider name, so you can include settings for multiple providers in the same call — only the options matching the active provider are used, and the rest are ignored.
+
+This is useful when you want to access features that are unique to a specific provider, such as exact reasoning token budgets, reasoning summaries, or server-side persistence controls.
+
+> **Note:** For reasoning effort, prefer the top-level `Reasoning` parameter for portability across providers. Use provider-specific options only when you need exact token budgets or provider-unique features. See [Reasoning](../06-advanced/reasoning.mdx) for details.
+
+## Common provider options
+
+Provider options are passed as a `map[string]interface{}` where the top-level keys are provider names (e.g., `"openai"`, `"xai"`, `"google"`). Each provider key maps to another `map[string]interface{}` containing that provider's specific settings.
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "Explain quantum entanglement.",
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "reasoningEffort": "low",
+        },
+    },
+})
+```
+
+If you switch from an OpenAI model to an XAI model, the `"openai"` options are silently ignored. You can include options for multiple providers to support model switching without code changes:
+
+```go
+ProviderOptions: map[string]interface{}{
+    "openai": map[string]interface{}{
+        "reasoningEffort": "low",
+    },
+    "xai": map[string]interface{}{
+        "reasoningSummary": "concise",
+    },
+}
+```
+
+The sections below cover the most frequently used provider options. For a complete reference, see the individual provider pages:
+
+- [OpenAI provider](../05-providers/02-openai.mdx)
+- [Anthropic provider](../05-providers/03-anthropic.mdx)
+- [Google provider](../05-providers/04-google.mdx)
+- [XAI provider](../05-providers/10-xai.mdx)
+
+## OpenAI
+
+### Reasoning effort
+
+Controls how much internal reasoning a model performs before responding. Available on reasoning models like `o3`, `o4-mini`, and `gpt-5.2`. Lower values are faster and use fewer tokens.
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "How many r's are in strawberry?",
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "reasoningEffort": "low",
+        },
+    },
+})
+
+// Access reasoning tokens from the result
+if openaiMeta, ok := result.ProviderMetadata["openai"].(map[string]interface{}); ok {
+    fmt.Println("Reasoning tokens:", openaiMeta["reasoningTokens"])
+}
+```
+
+| Value | Description |
+|-------|-------------|
+| `"none"` | No reasoning (GPT-5.1 models only) |
+| `"minimal"` | Bare-minimum reasoning |
+| `"low"` | Fast, concise reasoning |
+| `"medium"` | Balanced reasoning (default) |
+| `"high"` | Thorough reasoning |
+| `"xhigh"` | Maximum reasoning (GPT-5.1-Codex-Max only) |
+
+> **Note:** `"none"` and `"xhigh"` are only supported on specific models. Using them with unsupported models will result in an error.
+
+### Reasoning summary
+
+Surfaces the model's internal reasoning process in the response. Useful for debugging, auditing, or showing the user how the model arrived at an answer.
+
+| Value | Description |
+|-------|-------------|
+| `"auto"` | Condensed summary of reasoning |
+| `"detailed"` | Comprehensive reasoning output |
+
+**Non-streaming example:**
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "What is the capital of France?",
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "reasoningSummary": "detailed",
+        },
+    },
+})
+
+// Access reasoning from the result
+fmt.Println("Reasoning:", result.Reasoning)
+```
+
+**Streaming example:**
+
+```go
+stream, err := ai.StreamText(ctx, ai.StreamTextOptions{
+    Model:  model,
+    Prompt: "Solve this step by step: what is 127 * 43?",
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "reasoningSummary": "detailed",
+        },
+    },
+})
+```
+
+When streaming, reasoning summary chunks arrive as reasoning content before the main text response.
+
+### Text verbosity
+
+Controls the length and detail of the model's text response independently of reasoning:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "Write a poem about a boy and his first pet dog.",
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "textVerbosity": "low",
+        },
+    },
+})
+```
+
+| Value | Description |
+|-------|-------------|
+| `"low"` | Terse, minimal responses |
+| `"medium"` | Balanced detail (default) |
+| `"high"` | Verbose, comprehensive responses |
+
+### Store
+
+Controls whether OpenAI persists the request and response on their servers. When set to `false`, the SDK automatically strips unencrypted reasoning content from conversation history to comply with OpenAI's requirements.
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "Analyze this confidential data...",
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "store": false,
+        },
+    },
+})
+```
+
+## Anthropic
+
+Anthropic options are configured via `ModelOptions` when creating the language model, rather than through the per-call `ProviderOptions` map. This is because Anthropic features like thinking and speed mode are typically set once per model instance.
+
+### Thinking (extended reasoning)
+
+Enables Anthropic's extended thinking, which gives the model a dedicated thinking phase before responding. You control the budget in tokens — higher budgets allow deeper reasoning but increase latency and cost.
+
+For Opus 4.6 and newer models, use adaptive thinking:
+
+```go
+model, err := provider.LanguageModelWithOptions("claude-opus-4-6", &anthropic.ModelOptions{
+    Thinking: &anthropic.ThinkingConfig{
+        Type: anthropic.ThinkingTypeAdaptive,
+    },
+})
+```
+
+For earlier models, use enabled thinking with an explicit budget:
+
+```go
+budget := 12000
+model, err := provider.LanguageModelWithOptions("claude-sonnet-4-6", &anthropic.ModelOptions{
+    Thinking: &anthropic.ThinkingConfig{
+        Type:         anthropic.ThinkingTypeEnabled,
+        BudgetTokens: &budget,
+    },
+})
+```
+
+> **Note:** Thinking is supported on `claude-opus-4-6`, `claude-sonnet-4-6`, and similar models. You can also use the top-level `Reasoning` parameter for a portable alternative that works across providers.
+
+### Effort
+
+The `Effort` option provides a simpler way to control reasoning depth without specifying a token budget. It affects thinking, text responses, and function calls.
+
+```go
+model, err := provider.LanguageModelWithOptions("claude-opus-4-6", &anthropic.ModelOptions{
+    Effort: anthropic.EffortLow,
+})
+```
+
+| Value | Description |
+|-------|-------------|
+| `EffortLow` | Minimal reasoning, fastest responses |
+| `EffortMedium` | Balanced reasoning |
+| `EffortHigh` | Thorough reasoning (default) |
+| `EffortMax` | Maximum reasoning effort |
+
+### Fast mode (speed)
+
+For `claude-opus-4-6`, the `Speed` option enables approximately 2.5x faster output token speeds:
+
+```go
+model, err := provider.LanguageModelWithOptions("claude-opus-4-6", &anthropic.ModelOptions{
+    Speed: anthropic.SpeedFast,
+})
+```
+
+| Value | Description |
+|-------|-------------|
+| `SpeedFast` | ~2.5x faster output token speeds |
+| `SpeedStandard` | Standard inference speed (default) |
+
+### Send reasoning
+
+Controls whether reasoning content from previous turns is sent back to the model in multi-turn conversations. Set to `false` to reduce token usage when the model's reasoning history is not needed.
+
+```go
+disabled := false
+model, err := provider.LanguageModelWithOptions("claude-sonnet-4-6", &anthropic.ModelOptions{
+    SendReasoning: &disabled,
+})
+```
+
+## Google / Vertex
+
+### Thinking config
+
+Controls the thinking budget for Google and Vertex AI models that support reasoning (e.g., Gemini 2.5 Flash). The `thinkingBudget` is specified in tokens.
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "Write a proof that there are infinitely many primes.",
+    ProviderOptions: map[string]interface{}{
+        "google": map[string]interface{}{
+            "thinkingConfig": map[string]interface{}{
+                "thinkingBudget": 10000,
+            },
+        },
+    },
+})
+```
+
+For Vertex AI models, use the `"vertex"` key instead of `"google"`:
+
+```go
+ProviderOptions: map[string]interface{}{
+    "vertex": map[string]interface{}{
+        "thinkingConfig": map[string]interface{}{
+            "thinkingBudget": 10000,
+        },
+    },
+}
+```
+
+## XAI
+
+### Reasoning summary
+
+XAI (Grok) models support reasoning summaries with three levels of detail.
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "What are the key differences between TCP and UDP?",
+    ProviderOptions: map[string]interface{}{
+        "xai": map[string]interface{}{
+            "reasoningSummary": "concise",
+        },
+    },
+})
+```
+
+| Value | Description |
+|-------|-------------|
+| `"auto"` | Let the model decide the summary level |
+| `"concise"` | Brief reasoning summary |
+| `"detailed"` | Comprehensive reasoning output |
+
+## Combining options
+
+You can combine multiple provider options in a single call. For example, using both reasoning effort and reasoning summaries with OpenAI:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:  model,
+    Prompt: "What are the implications of quantum computing for cryptography?",
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "reasoningEffort":  "high",
+            "reasoningSummary": "detailed",
+        },
+    },
+})
+```
+
+Or combining thinking with a specific effort level for Anthropic:
+
+```go
+budget := 8000
+model, err := provider.LanguageModelWithOptions("claude-opus-4-6", &anthropic.ModelOptions{
+    Thinking: &anthropic.ThinkingConfig{
+        Type:         anthropic.ThinkingTypeEnabled,
+        BudgetTokens: &budget,
+    },
+    Effort: anthropic.EffortMedium,
+})
+```
+
+You can also combine the top-level `Reasoning` parameter with provider-specific options. The top-level parameter sets portable reasoning effort, while provider options handle provider-unique features:
+
+```go
+reasoning := types.ReasoningLow
+
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+    Model:     model,
+    Prompt:    "Explain the Riemann hypothesis.",
+    Reasoning: &reasoning,
+    ProviderOptions: map[string]interface{}{
+        "openai": map[string]interface{}{
+            "reasoningSummary": "detailed",
+        },
+    },
+})
+```
+
+When both `Reasoning` and a provider-specific reasoning effort are set, the provider-specific setting takes precedence. For Anthropic, a call-level `Reasoning` value overrides the model-level `Thinking` configuration.
+
+## Type safety
+
+Anthropic options use typed Go structs for compile-time safety:
+
+```go
+import "github.com/digitallysavvy/go-ai/pkg/providers/anthropic"
+
+// Typed structs — typos caught at compile time
+opts := &anthropic.ModelOptions{
+    Thinking: &anthropic.ThinkingConfig{Type: anthropic.ThinkingTypeAdaptive},
+    Effort:   anthropic.EffortHigh,
+    Speed:    anthropic.SpeedFast,
+}
+```
+
+OpenAI, Google, XAI, and other providers use `map[string]interface{}` with documented string keys. Refer to the individual provider pages for the full list of supported keys:
+
+- [OpenAI provider](../05-providers/02-openai.mdx)
+- [Anthropic provider](../05-providers/03-anthropic.mdx)
+
+## See also
+
+- [Providers and models](./02-providers-and-models.mdx) — overview of available providers
+- [Streaming](./05-streaming.mdx) — how streaming works with provider options
+- [OpenAI provider](../05-providers/02-openai.mdx)
+- [Anthropic provider](../05-providers/03-anthropic.mdx)
+- [Google provider](../05-providers/04-google.mdx)
+- [Google Vertex provider](../05-providers/05-google-vertex.mdx)
+- [XAI provider](../05-providers/10-xai.mdx)
