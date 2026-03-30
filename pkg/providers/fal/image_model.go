@@ -70,7 +70,7 @@ func (m *ImageModel) buildRequestBody(opts *provider.ImageGenerateOptions) map[s
 
 	if opts.Size != "" {
 		var width, height int
-		fmt.Sscanf(opts.Size, "%dx%d", &width, &height)
+		_, _ = fmt.Sscanf(opts.Size, "%dx%d", &width, &height) //nolint:errcheck
 		if width > 0 {
 			body["image_size"] = map[string]interface{}{
 				"width":  width,

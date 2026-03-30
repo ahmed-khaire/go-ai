@@ -138,7 +138,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer httpResp.Body.Close() //nolint:errcheck
 
 	// Read response body
 	respBody, err := io.ReadAll(httpResp.Body)
@@ -246,7 +246,7 @@ func (c *Client) DoStream(ctx context.Context, req Request) (*http.Response, err
 
 	// Check for error status codes
 	if httpResp.StatusCode >= 400 {
-		defer httpResp.Body.Close()
+		defer httpResp.Body.Close() //nolint:errcheck
 		errBody, _ := io.ReadAll(httpResp.Body)
 		return nil, fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(errBody))
 	}

@@ -42,8 +42,6 @@ var (
 	// Matches <reference to="path.mdx" />
 	referenceRegex = regexp.MustCompile(`<reference\s+to="([^"]+)"\s*/>`)
 
-	// Matches import statements that might reference other docs
-	importRegex = regexp.MustCompile(`import\s+.*from\s+['"]([^'"]+)['"]`)
 )
 
 func main() {
@@ -158,7 +156,7 @@ func (v *LinkValidator) extractLinksFromFile(relPath, fullPath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	scanner := bufio.NewScanner(file)
 	lineNumber := 0

@@ -38,7 +38,7 @@ data: [DONE]
 
 `
 	stream := newTestStream(sseData)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -82,7 +82,7 @@ data: [DONE]
 
 `
 	stream := newTestStream(sseData)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -132,7 +132,7 @@ data: [DONE]
 
 `
 	stream := newTestStream(sseData)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -177,7 +177,7 @@ data: [DONE]
 
 `
 	stream := newTestStream(sseData)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {

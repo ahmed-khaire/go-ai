@@ -89,7 +89,7 @@ func (m *BedrockAnthropicLanguageModel) DoGenerate(ctx context.Context, opts *pr
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -602,7 +602,7 @@ func (s *bedrockAnthropicStream) Read(p []byte) (n int, err error) {
 // Close closes the stream
 func (s *bedrockAnthropicStream) Close() error {
 	if s.sseReader != nil {
-		s.sseReader.Close()
+		_ = s.sseReader.Close()
 	}
 	if s.rawBody != nil {
 		return s.rawBody.Close()

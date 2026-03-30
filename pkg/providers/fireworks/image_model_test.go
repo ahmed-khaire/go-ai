@@ -66,7 +66,7 @@ func newAsyncTestServer(t *testing.T, modelID, requestID string, pollResponses [
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintln(w, pollResponses[idx])
+			_, _ = fmt.Fprintln(w, pollResponses[idx]) //nolint:errcheck
 
 		default:
 			http.NotFound(w, r)
@@ -254,7 +254,7 @@ func TestDoGenerateAsync_SubmitRequestBody(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 			ts.submitBody = body
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
@@ -425,7 +425,7 @@ func TestDoGenerateSync_NonAsyncModel(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"data": [{"url": "https://example.com/sync.png"}]}`)
+		_, _ = fmt.Fprintln(w, `{"data": [{"url": "https://example.com/sync.png"}]}`) //nolint:errcheck
 	})
 
 	server := httptest.NewServer(mux)
@@ -477,7 +477,7 @@ func TestCheckAsyncStatus_Statuses(t *testing.T) {
 			mux.HandleFunc("/v1/workflows/", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintln(w, respBody)
+				_, _ = fmt.Fprintln(w, respBody) //nolint:errcheck
 			})
 			server := httptest.NewServer(mux)
 			defer server.Close()

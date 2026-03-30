@@ -30,9 +30,9 @@ func TestGetAPIKeyPrimaryEnvVar(t *testing.T) {
 // TestGetAPIKeyDeprecatedFallback verifies TOGETHER_AI_API_KEY is used when
 // TOGETHER_API_KEY is absent.
 func TestGetAPIKeyDeprecatedFallback(t *testing.T) {
-	os.Unsetenv("TOGETHER_API_KEY")
+	_ = os.Unsetenv("TOGETHER_API_KEY") //nolint:errcheck
 	t.Setenv("TOGETHER_AI_API_KEY", "deprecated-key")
-	t.Cleanup(func() { os.Unsetenv("TOGETHER_AI_API_KEY") })
+	t.Cleanup(func() { _ = os.Unsetenv("TOGETHER_AI_API_KEY") })
 
 	got := getAPIKey("")
 	if got != "deprecated-key" {
@@ -42,11 +42,11 @@ func TestGetAPIKeyDeprecatedFallback(t *testing.T) {
 
 // TestGetAPIKeyEmpty verifies empty string is returned when neither env var is set.
 func TestGetAPIKeyEmpty(t *testing.T) {
-	os.Unsetenv("TOGETHER_API_KEY")
-	os.Unsetenv("TOGETHER_AI_API_KEY")
+	_ = os.Unsetenv("TOGETHER_API_KEY") //nolint:errcheck
+	_ = os.Unsetenv("TOGETHER_AI_API_KEY") //nolint:errcheck
 	t.Cleanup(func() {
-		os.Unsetenv("TOGETHER_API_KEY")
-		os.Unsetenv("TOGETHER_AI_API_KEY")
+		_ = os.Unsetenv("TOGETHER_API_KEY") //nolint:errcheck
+		_ = os.Unsetenv("TOGETHER_AI_API_KEY") //nolint:errcheck
 	})
 
 	got := getAPIKey("")

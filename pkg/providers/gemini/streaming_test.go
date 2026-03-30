@@ -72,7 +72,7 @@ func TestStream_ThoughtPartsEmitReasoning(t *testing.T) {
 	})
 
 	s := newTestStream(sseStream(thoughtEvent, textEvent))
-	defer s.Close()
+	defer s.Close() //nolint:errcheck //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -130,7 +130,7 @@ func TestStream_MultiplePartsInSingleEvent(t *testing.T) {
 	})
 
 	s := newTestStream(sseStream(event))
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -184,7 +184,7 @@ func TestStream_FinishReasonEmittedAfterText(t *testing.T) {
 	})
 
 	s := newTestStream(sseStream(event))
-	defer s.Close()
+	defer s.Close() //nolint:errcheck //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -237,7 +237,7 @@ func TestStream_CodeExecution(t *testing.T) {
 	})
 
 	s := newTestStream(sseStream(codeEvent))
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -290,7 +290,7 @@ func TestStream_GroundingMetadataAccumulatedOnFinish(t *testing.T) {
 	})
 
 	s := newTestStream(sseStream(earlyChunk, finishChunk))
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -345,7 +345,7 @@ func TestStream_ToolInputDeltaCarriesID(t *testing.T) {
 	})
 
 	s := newTestStream(sseStream(event))
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -456,7 +456,7 @@ func TestStream_MetadataKeyAppearsInFinishChunk(t *testing.T) {
 
 	// Test with vertex key.
 	sv := newStream(sseStream(event), Config{MetadataKey: "vertex"})
-	defer sv.Close()
+	defer sv.Close() //nolint:errcheck
 	var vertexChunks []*provider.StreamChunk
 	for {
 		c, err := sv.Next()

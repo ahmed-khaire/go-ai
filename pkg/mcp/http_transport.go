@@ -181,7 +181,7 @@ func (t *HTTPTransport) Send(ctx context.Context, message *MCPMessage) error {
 	if err != nil {
 		return NewTransportError("failed to send request", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {

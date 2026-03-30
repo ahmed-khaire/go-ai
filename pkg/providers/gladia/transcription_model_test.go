@@ -72,7 +72,7 @@ func TestTranscriptionModel_DoTranscribe(t *testing.T) {
 		// Return mock response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(mockResponse)
+		_ = json.NewEncoder(w).Encode(mockResponse) //nolint:errcheck
 	}))
 	defer server.Close()
 

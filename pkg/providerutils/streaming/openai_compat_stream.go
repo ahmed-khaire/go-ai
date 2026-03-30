@@ -224,7 +224,7 @@ func (s *OpenAICompatStream) Next() (*provider.StreamChunk, error) {
 				}
 				var args map[string]interface{}
 				if accum.arguments != "" {
-					json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck — partial JSON yields nil args, caller handles
+					_ = json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
 				}
 				s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
 					Type: provider.ChunkTypeToolCall,

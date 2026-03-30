@@ -228,9 +228,9 @@ func (s *gatewayTextStream) convertChunk(chunk *gatewayStreamChunk) (*provider.S
 		// Parse tool call arguments if present
 		var args map[string]interface{}
 		if chunk.ToolCallArgs != "" {
-			json.Unmarshal([]byte(chunk.ToolCallArgs), &args)
+			_ = json.Unmarshal([]byte(chunk.ToolCallArgs), &args) //nolint:errcheck
 		} else if chunk.ToolCallArgsText != "" {
-			json.Unmarshal([]byte(chunk.ToolCallArgsText), &args)
+			_ = json.Unmarshal([]byte(chunk.ToolCallArgsText), &args) //nolint:errcheck
 		}
 
 		return &provider.StreamChunk{

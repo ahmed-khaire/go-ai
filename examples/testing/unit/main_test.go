@@ -70,6 +70,6 @@ func BenchmarkGenerateText(b *testing.B) {
 	mock := &MockModel{response: "Benchmark response"}
 
 	for i := 0; i < b.N; i++ {
-		mock.DoGenerate(context.Background(), nil)
+		_, _ = mock.DoGenerate(context.Background(), nil) //nolint:errcheck
 	}
 }

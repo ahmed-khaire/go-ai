@@ -124,7 +124,7 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 	if err != nil {
 		return nil, m.handleError(err)
 	}
-	defer httpResp.Body.Close()
+	defer httpResp.Body.Close() //nolint:errcheck
 
 	// Read and parse the SSE stream
 	result, err := m.readSSEVideoResponse(ctx, httpResp.Body)

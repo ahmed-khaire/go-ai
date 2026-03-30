@@ -15,7 +15,7 @@ func TestMCPTransportRedirectDefaultError(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`)) //nolint:errcheck
 	}))
 	defer target.Close()
 
@@ -49,7 +49,7 @@ func TestMCPTransportRedirectFollow(t *testing.T) {
 	finalSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`)) //nolint:errcheck
 	}))
 	defer finalSrv.Close()
 

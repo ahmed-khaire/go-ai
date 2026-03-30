@@ -124,13 +124,13 @@ func (t *StdioTransport) Close() error {
 
 	// Close pipes
 	if t.stdin != nil {
-		t.stdin.Close()
+		_ = t.stdin.Close()
 	}
 	if t.stdout != nil {
-		t.stdout.Close()
+		_ = t.stdout.Close()
 	}
 	if t.stderr != nil {
-		t.stderr.Close()
+		_ = t.stderr.Close()
 	}
 
 	// Kill process
