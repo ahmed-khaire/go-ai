@@ -24,6 +24,9 @@ type Config struct {
 	// BaseURL is the base URL for the Prodia API (optional).
 	// Defaults to https://inference.prodia.com/v2
 	BaseURL string
+
+	// Headers contains custom headers to include in all requests.
+	Headers map[string]string
 }
 
 // New creates a new Prodia provider with the given configuration.
@@ -40,12 +43,17 @@ func New(cfg Config) *Provider {
 		apiKey = os.Getenv("PRODIA_TOKEN")
 	}
 
+	headers := map[string]string{
+		"Authorization": "Bearer " + apiKey,
+		"Content-Type":  "application/json",
+	}
+	for k, v := range cfg.Headers {
+		headers[k] = v
+	}
+
 	client := internalhttp.NewClient(internalhttp.Config{
 		BaseURL: baseURL,
-		Headers: map[string]string{
-			"Authorization": "Bearer " + apiKey,
-			"Content-Type":  "application/json",
-		},
+		Headers: headers,
 	})
 
 	return &Provider{
