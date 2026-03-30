@@ -1,5 +1,10 @@
 # Go AI SDK
 
+[![CI](https://github.com/digitallysavvy/go-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/digitallysavvy/go-ai/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/digitallysavvy/go-ai)](https://goreportcard.com/report/github.com/digitallysavvy/go-ai)
+[![Go Reference](https://pkg.go.dev/badge/github.com/digitallysavvy/go-ai.svg)](https://pkg.go.dev/github.com/digitallysavvy/go-ai)
+[![License](https://img.shields.io/github/license/digitallysavvy/go-ai)](./LICENSE)
+
 The [Go AI SDK](https://github.com/digitallysavvy/go-ai) is a comprehensive toolkit designed to help you build AI-powered applications and agents using Go. It provides 1:1 feature parity with the [Vercel AI SDK](https://ai-sdk.dev) for backend functionality.
 
 To learn more about how to use the Go AI SDK, check out our [Documentation](./docs).
