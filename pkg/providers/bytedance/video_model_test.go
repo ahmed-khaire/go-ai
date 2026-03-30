@@ -936,7 +936,7 @@ func TestPolling_ContextCancellation(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/abort-test-id", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "abort-test-id", "status": "processing"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "abort-test-id", "status": "processing"}`)
 	})
 
 	server := httptest.NewServer(mux)
@@ -992,12 +992,12 @@ func TestError_TaskFailed(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "failed-task-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "failed-task-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/failed-task-id", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "failed-task-id", "status": "failed"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "failed-task-id", "status": "failed"}`)
 	})
 
 	server := httptest.NewServer(mux)

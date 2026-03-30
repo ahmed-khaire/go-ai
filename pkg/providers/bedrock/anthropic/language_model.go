@@ -147,7 +147,7 @@ func (m *BedrockAnthropicLanguageModel) DoStream(ctx context.Context, opts *prov
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		return nil, m.handleErrorResponse(resp)
 	}
 

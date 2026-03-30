@@ -139,7 +139,7 @@ func TestDoGenerateAsync_ImmediateSuccess(t *testing.T) {
 			pollCalled = true
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+			_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 		default:
 			http.NotFound(w, r)
 		}
@@ -204,7 +204,7 @@ func TestDoGenerateAsync_MultiPollSuccess(t *testing.T) {
 				fmt.Fprintf(w, `{"id": %q, "status": "Running", "result": null}`, requestID)
 			default:
 				imageURL := ts.server.URL + "/fake-image"
-				fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+				_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 			}
 		default:
 			http.NotFound(w, r)
@@ -261,7 +261,7 @@ func TestDoGenerateAsync_SubmitRequestBody(t *testing.T) {
 		case pollPath:
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+			_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 		default:
 			http.NotFound(w, r)
 		}
@@ -561,7 +561,7 @@ func TestDoGenerateAsync_Warnings(t *testing.T) {
 		case pollPath:
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+			_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 		default:
 			http.NotFound(w, r)
 		}

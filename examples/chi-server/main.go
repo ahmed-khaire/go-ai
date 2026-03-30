@@ -39,7 +39,7 @@ func main() {
 	}))
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"service": "Go AI Chi Server",
 			"version": "1.0.0",
 		})
@@ -73,7 +73,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"text":  result.Text,
 		"usage": result.Usage,
 	})

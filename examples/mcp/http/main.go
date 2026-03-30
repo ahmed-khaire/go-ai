@@ -35,7 +35,7 @@ func (s *MCPHTTPServer) handleTools(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{"tools": toolsList})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"tools": toolsList})
 }
 
 func (s *MCPHTTPServer) handleGenerate(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +61,7 @@ func (s *MCPHTTPServer) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"text":  result.Text,
 		"usage": result.Usage,
 	})

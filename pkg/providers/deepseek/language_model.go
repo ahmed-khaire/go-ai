@@ -419,7 +419,7 @@ func (s *deepseekStream) flushDeepseekToolCalls(finishReason string) {
 		}
 		var args map[string]interface{}
 		if accum.arguments != "" {
-			json.Unmarshal([]byte(accum.arguments), &args)
+			_ = json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
 		}
 		s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
 			Type: provider.ChunkTypeToolCall,

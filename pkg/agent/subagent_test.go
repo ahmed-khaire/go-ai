@@ -360,7 +360,7 @@ func TestSubagentRegistry_ExecuteWithError(t *testing.T) {
 		},
 	}
 
-	registry.Register("error-agent", agent)
+	_ = registry.Register("error-agent", agent)
 
 	_, err := registry.Execute(context.Background(), "error-agent", "test")
 	if err == nil {

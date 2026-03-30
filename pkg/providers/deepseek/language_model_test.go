@@ -20,7 +20,7 @@ data: [DONE]
 
 `
 	stream := newDeepseekStream(io.NopCloser(strings.NewReader(sseData)))
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -64,7 +64,7 @@ data: [DONE]
 
 `
 	stream := newDeepseekStream(io.NopCloser(strings.NewReader(sseData)))
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -113,7 +113,7 @@ data: [DONE]
 
 `
 	stream := newDeepseekStream(io.NopCloser(strings.NewReader(sseData)))
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {

@@ -310,7 +310,7 @@ func (m *LanguageModel) convertResponse(response OpenResponsesResponse) *types.G
 
 			var args map[string]interface{}
 			if item.Arguments != "" {
-				json.Unmarshal([]byte(item.Arguments), &args)
+				_ = json.Unmarshal([]byte(item.Arguments), &args) //nolint:errcheck
 			}
 
 			toolCalls = append(toolCalls, types.ToolCall{
@@ -535,7 +535,7 @@ func (s *openResponsesStream) handleStreamEvent(event *StreamEvent) (*provider.S
 			if toolCallState, ok := s.toolCallsByItemID[event.Item.ID]; ok {
 				var args map[string]interface{}
 				if toolCallState.ArgsJSON != "" {
-					json.Unmarshal([]byte(toolCallState.ArgsJSON), &args)
+					_ = json.Unmarshal([]byte(toolCallState.ArgsJSON), &args) //nolint:errcheck
 				}
 				return &provider.StreamChunk{
 					Type: provider.ChunkTypeToolCall,

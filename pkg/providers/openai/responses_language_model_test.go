@@ -198,7 +198,7 @@ func TestResponsesLanguageModel_DoStream_Text(t *testing.T) {
 			`{"type":"response.completed","response":{"id":"resp_stream","usage":{"input_tokens":5,"output_tokens":3}}}`,
 		}
 		for _, e := range events {
-			fmt.Fprintf(w, "data: %s\n\n", e)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", e)
 		}
 	}))
 	defer server.Close()
@@ -265,7 +265,7 @@ func TestResponsesLanguageModel_DoStream_ToolCall(t *testing.T) {
 			`{"type":"response.completed","response":{"id":"r1","usage":{"input_tokens":5,"output_tokens":5}}}`,
 		}
 		for _, e := range events {
-			fmt.Fprintf(w, "data: %s\n\n", e)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", e)
 		}
 	}))
 	defer server.Close()

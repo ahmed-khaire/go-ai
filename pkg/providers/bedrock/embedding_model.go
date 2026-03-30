@@ -149,7 +149,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 	if err != nil {
 		return nil, providererrors.NewProviderError("aws-bedrock", 0, "", err.Error(), err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
