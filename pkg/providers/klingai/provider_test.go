@@ -48,11 +48,11 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("loads credentials from environment variables", func(t *testing.T) {
-		os.Setenv("KLINGAI_ACCESS_KEY", "env-access-key")
-		os.Setenv("KLINGAI_SECRET_KEY", "env-secret-key")
+		_ = os.Setenv("KLINGAI_ACCESS_KEY", "env-access-key")
+		_ = os.Setenv("KLINGAI_SECRET_KEY", "env-secret-key")
 		defer func() {
-			os.Unsetenv("KLINGAI_ACCESS_KEY")
-			os.Unsetenv("KLINGAI_SECRET_KEY")
+			_ = os.Unsetenv("KLINGAI_ACCESS_KEY")
+			_ = os.Unsetenv("KLINGAI_SECRET_KEY")
 		}()
 
 		cfg := Config{}
@@ -71,11 +71,11 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("explicit config takes precedence over env variables", func(t *testing.T) {
-		os.Setenv("KLINGAI_ACCESS_KEY", "env-access-key")
-		os.Setenv("KLINGAI_SECRET_KEY", "env-secret-key")
+		_ = os.Setenv("KLINGAI_ACCESS_KEY", "env-access-key")
+		_ = os.Setenv("KLINGAI_SECRET_KEY", "env-secret-key")
 		defer func() {
-			os.Unsetenv("KLINGAI_ACCESS_KEY")
-			os.Unsetenv("KLINGAI_SECRET_KEY")
+			_ = os.Unsetenv("KLINGAI_ACCESS_KEY")
+			_ = os.Unsetenv("KLINGAI_SECRET_KEY")
 		}()
 
 		cfg := Config{
@@ -94,8 +94,8 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("returns error when access key is missing", func(t *testing.T) {
-		os.Unsetenv("KLINGAI_ACCESS_KEY")
-		os.Unsetenv("KLINGAI_SECRET_KEY")
+		_ = os.Unsetenv("KLINGAI_ACCESS_KEY")
+		_ = os.Unsetenv("KLINGAI_SECRET_KEY")
 
 		cfg := Config{
 			SecretKey: "test-secret-key",
@@ -108,8 +108,8 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("returns error when secret key is missing", func(t *testing.T) {
-		os.Unsetenv("KLINGAI_ACCESS_KEY")
-		os.Unsetenv("KLINGAI_SECRET_KEY")
+		_ = os.Unsetenv("KLINGAI_ACCESS_KEY")
+		_ = os.Unsetenv("KLINGAI_SECRET_KEY")
 
 		cfg := Config{
 			AccessKey: "test-access-key",

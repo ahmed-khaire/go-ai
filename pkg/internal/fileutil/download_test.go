@@ -99,7 +99,7 @@ func TestDownload_ExactlyAtLimit(t *testing.T) {
 	content := strings.Repeat("x", 1000)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(content))
+		_, _ = w.Write([]byte(content))
 	}))
 	defer server.Close()
 
@@ -120,7 +120,7 @@ func TestDownload_JustOverLimit(t *testing.T) {
 	content := strings.Repeat("x", 1001)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(content))
+		_, _ = w.Write([]byte(content))
 	}))
 	defer server.Close()
 
@@ -141,7 +141,7 @@ func TestDownload_JustOverLimit(t *testing.T) {
 func TestDownload_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
 	defer server.Close()
 
@@ -293,7 +293,7 @@ func TestDownloadToWriter_ExceedsLimit(t *testing.T) {
 	content := strings.Repeat("x", 1001)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(content))
+		_, _ = w.Write([]byte(content))
 	}))
 	defer server.Close()
 

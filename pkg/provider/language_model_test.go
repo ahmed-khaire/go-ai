@@ -146,7 +146,7 @@ func TestLanguageModel_InterfaceCompliance(t *testing.T) {
 	if stream == nil {
 		t.Fatal("expected non-nil stream from DoStream")
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 }
 
 func TestLanguageModel_CapabilityFlags(t *testing.T) {
@@ -302,7 +302,7 @@ func TestLanguageModel_StreamOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	// Verify options were passed correctly
 	if len(model.streamCalls) != 1 {

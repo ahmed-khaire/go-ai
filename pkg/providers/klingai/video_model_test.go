@@ -1370,7 +1370,7 @@ func TestKlingMotionBrushSerialization(t *testing.T) {
 
 	t.Run("Trajectory X Y are float64 matching TS number type", func(t *testing.T) {
 		traj := Trajectory{X: 42.5, Y: 84.25}
-		var x, y float64 = traj.X, traj.Y
+		x, y := traj.X, traj.Y
 		if x != 42.5 || y != 84.25 {
 			t.Errorf("trajectory = %+v", traj)
 		}

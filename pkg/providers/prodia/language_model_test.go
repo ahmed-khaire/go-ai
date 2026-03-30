@@ -24,7 +24,7 @@ func buildTestMultipartBody(jobJSON string, outputData []byte, outputMIME string
 	jh.Set("Content-Disposition", `form-data; name="job"`)
 	jh.Set("Content-Type", "application/json")
 	jPart, _ := mw.CreatePart(jh)
-	jPart.Write([]byte(jobJSON))
+	_, _ = jPart.Write([]byte(jobJSON))
 
 	// output part (optional)
 	if len(outputData) > 0 {
@@ -34,10 +34,10 @@ func buildTestMultipartBody(jobJSON string, outputData []byte, outputMIME string
 			oh.Set("Content-Type", outputMIME)
 		}
 		oPart, _ := mw.CreatePart(oh)
-		oPart.Write(outputData)
+		_, _ = oPart.Write(outputData)
 	}
 
-	mw.Close()
+	_ = mw.Close()
 	return buf.Bytes(), mw.FormDataContentType()
 }
 

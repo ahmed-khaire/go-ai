@@ -187,7 +187,7 @@ func TestPromptCacheRetentionWithStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DoStream failed: %v", err)
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	// Read chunks
 	chunk, err := stream.Next()
@@ -244,7 +244,7 @@ func TestPromptCacheRetentionModels(t *testing.T) {
 					},
 				}
 
-				json.NewEncoder(w).Encode(response)
+				_ = json.NewEncoder(w).Encode(response)
 			}))
 			defer server.Close()
 
@@ -413,7 +413,7 @@ func TestDoGenerateFinishReasonMapping(t *testing.T) {
 						TotalTokens:      15,
 					},
 				}
-				json.NewEncoder(w).Encode(response)
+				_ = json.NewEncoder(w).Encode(response)
 			}))
 			defer server.Close()
 
@@ -483,7 +483,7 @@ func TestDoGenerateToolCallsFinishReason(t *testing.T) {
 				TotalTokens:      25,
 			},
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -582,7 +582,7 @@ func TestDoStreamFinishReasonMapping(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DoStream failed: %v", err)
 			}
-			defer stream.Close()
+			defer stream.Close() //nolint:errcheck
 
 			// Read text chunk
 			chunk, err := stream.Next()
@@ -650,7 +650,7 @@ func TestDoStreamToolCallChunks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DoStream failed: %v", err)
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	// Chunk 1: text
 	chunk, err := stream.Next()
@@ -726,7 +726,7 @@ func TestDoStreamToolCallDeltaNullType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DoStream failed: %v", err)
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	// Expect a tool call chunk assembled from the two deltas.
 	chunk, err := stream.Next()

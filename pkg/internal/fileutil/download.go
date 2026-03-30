@@ -96,7 +96,7 @@ func Download(ctx context.Context, url string, opts DownloadOptions) ([]byte, er
 	if err != nil {
 		return nil, providererrors.NewDownloadError(url, 0, "", "", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -191,7 +191,7 @@ func DownloadToWriter(ctx context.Context, url string, writer io.Writer, opts Do
 	if err != nil {
 		return providererrors.NewDownloadError(url, 0, "", "", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -253,7 +253,7 @@ func GetContentType(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get headers: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	return resp.Header.Get("Content-Type"), nil
 }
@@ -273,7 +273,7 @@ func GetContentLength(ctx context.Context, url string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to get headers: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	return resp.ContentLength, nil
 }

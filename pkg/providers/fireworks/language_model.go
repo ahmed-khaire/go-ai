@@ -115,7 +115,7 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 	if opts.TopP != nil {
 		body["top_p"] = *opts.TopP
 	}
-	if opts.StopSequences != nil && len(opts.StopSequences) > 0 {
+	if len(opts.StopSequences) > 0 {
 		body["stop"] = opts.StopSequences
 	}
 	if len(opts.Tools) > 0 {
@@ -198,7 +198,7 @@ func (m *LanguageModel) convertResponse(response fireworksResponse) *types.Gener
 		for i, tc := range choice.Message.ToolCalls {
 			var args map[string]interface{}
 			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
 			}
 			result.ToolCalls[i] = types.ToolCall{
 				ID:        tc.ID,

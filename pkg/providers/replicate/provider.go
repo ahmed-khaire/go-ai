@@ -55,7 +55,7 @@ func (p *Provider) Name() string {
 // LanguageModel returns a language model by model version or model:version string
 func (p *Provider) LanguageModel(modelID string) (provider.LanguageModel, error) {
 	if modelID == "" {
-		return nil, fmt.Errorf("Replicate requires a model ID (e.g., 'meta/llama-2-70b-chat')")
+		return nil, fmt.Errorf("replicate requires a model ID (e.g., 'meta/llama-2-70b-chat')")
 	}
 
 	return NewLanguageModel(p, modelID), nil

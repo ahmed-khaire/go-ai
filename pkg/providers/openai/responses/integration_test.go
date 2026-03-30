@@ -26,7 +26,7 @@ func TestIntegration_CustomTool_WireFormat(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
+		_, _ = fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
 	}))
 	defer server.Close()
 
@@ -90,9 +90,9 @@ func TestIntegration_ShellTools_WireFormat(t *testing.T) {
 	var capturedBody map[string]interface{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedBody)
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
+		_, _ = fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
 	}))
 	defer server.Close()
 
@@ -142,7 +142,7 @@ func TestIntegration_ShellTools_WireFormat(t *testing.T) {
 func TestIntegration_Phase_InResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{
+		_, _ = fmt.Fprint(w, `{
 			"id": "resp_123",
 			"output": [
 				{

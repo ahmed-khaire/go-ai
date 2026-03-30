@@ -266,7 +266,7 @@ func (m *LanguageModel) convertResponse(response openAIResponse) *types.Generate
 			result.ToolCalls = make([]types.ToolCall, len(choice.Message.ToolCalls))
 			for i, tc := range choice.Message.ToolCalls {
 				var args map[string]interface{}
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
 
 				result.ToolCalls[i] = types.ToolCall{
 					ID:        tc.ID,
@@ -587,7 +587,7 @@ func (s *openAIStream) Next() (*provider.StreamChunk, error) {
 				}
 				var args map[string]interface{}
 				if accum.arguments != "" {
-					json.Unmarshal([]byte(accum.arguments), &args)
+					_ = json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
 				}
 				s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
 					Type: provider.ChunkTypeToolCall,

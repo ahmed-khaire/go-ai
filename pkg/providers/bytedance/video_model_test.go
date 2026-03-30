@@ -56,10 +56,10 @@ func newTestServer(t *testing.T, createTaskID string, statusResponses []string) 
 			if createTaskID == "" {
 				// Simulate empty id response
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintln(w, `{}`)
+				_, _ = fmt.Fprintln(w, `{}`)
 			} else {
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{"id": %q}`, createTaskID)
+				_, _ = fmt.Fprintf(w, `{"id": %q}`, createTaskID)
 			}
 
 		default:
@@ -86,7 +86,7 @@ func newTestServer(t *testing.T, createTaskID string, statusResponses []string) 
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, statusResponses[idx])
+		_, _ = fmt.Fprintln(w, statusResponses[idx])
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -99,7 +99,7 @@ func newErrorServer(t *testing.T, statusCode int, errorBody string) *httptest.Se
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		fmt.Fprintln(w, errorBody)
+		_, _ = fmt.Fprintln(w, errorBody)
 	})
 	return httptest.NewServer(mux)
 }

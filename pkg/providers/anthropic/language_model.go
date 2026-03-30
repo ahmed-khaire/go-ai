@@ -121,7 +121,7 @@ func (m *LanguageModel) DoGenerate(ctx context.Context, opts *provider.GenerateO
 		if err != nil {
 			return nil, m.handleError(err)
 		}
-		defer httpResp.Body.Close()
+		defer httpResp.Body.Close() //nolint:errcheck
 
 		// Parse response
 		var response anthropicResponse

@@ -94,7 +94,7 @@ func (m *LanguageModel) DoStream(ctx context.Context, opts *provider.GenerateOpt
 	// Check for HTTP errors
 	if httpResp.StatusCode != 200 {
 		body, _ := io.ReadAll(httpResp.Body)
-		httpResp.Body.Close()
+		httpResp.Body.Close() //nolint:errcheck
 		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
 	}
 

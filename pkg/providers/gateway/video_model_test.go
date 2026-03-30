@@ -569,7 +569,7 @@ func TestVideoModel_ModelIDHeader(t *testing.T) {
 		capturedModelID = r.Header.Get("ai-model-id")
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
 	}))
 	defer server.Close()
 
@@ -628,7 +628,7 @@ func TestVideoModel_ProviderOptionsAlwaysSent(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
 			}))
 			defer server.Close()
 
@@ -662,7 +662,7 @@ func TestVideoModel_URLImageEncoding(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
 	}))
 	defer server.Close()
 

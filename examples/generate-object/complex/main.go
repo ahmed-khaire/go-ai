@@ -125,7 +125,7 @@ func generateCompanyStructure(ctx context.Context, model provider.LanguageModel)
 		},
 	})
 
-	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{
+	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{ //nolint:staticcheck
 		Model:  model,
 		Prompt: "Generate a tech company structure with 2 departments (Engineering and Product), each with 2 teams",
 		Schema: companySchema,
@@ -239,7 +239,7 @@ func generateEcommerceOrder(ctx context.Context, model provider.LanguageModel) {
 		},
 	})
 
-	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{
+	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{ //nolint:staticcheck
 		Model:  model,
 		Prompt: "Generate a complete e-commerce order for a customer buying 3 different electronics items with shipping",
 		Schema: orderSchema,
@@ -364,7 +364,7 @@ func generateCourseCurriculum(ctx context.Context, model provider.LanguageModel)
 		},
 	})
 
-	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{
+	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{ //nolint:staticcheck
 		Model:  model,
 		Prompt: "Generate a complete computer science course curriculum on 'Introduction to Machine Learning' with 3 modules",
 		Schema: curriculumSchema,

@@ -173,7 +173,7 @@ func (w *SSEWriter) WriteEvent(event SSEEvent) error {
 	if event.Data != "" {
 		lines := strings.Split(event.Data, "\n")
 		for _, line := range lines {
-			buf.WriteString(fmt.Sprintf("data: %s\n", line))
+			fmt.Fprintf(&buf, "data: %s\n", line)
 		}
 	}
 

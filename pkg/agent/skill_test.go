@@ -153,8 +153,8 @@ func TestSkillRegistry_List(t *testing.T) {
 		},
 	}
 
-	registry.Register(skill1)
-	registry.Register(skill2)
+	_ = registry.Register(skill1)
+	_ = registry.Register(skill2)
 
 	skills := registry.List()
 	if len(skills) != 2 {
@@ -181,8 +181,8 @@ func TestSkillRegistry_Names(t *testing.T) {
 		},
 	}
 
-	registry.Register(skill1)
-	registry.Register(skill2)
+	_ = registry.Register(skill1)
+	_ = registry.Register(skill2)
 
 	names := registry.Names()
 	if len(names) != 2 {
@@ -248,8 +248,8 @@ func TestSkillRegistry_Clear(t *testing.T) {
 		},
 	}
 
-	registry.Register(skill1)
-	registry.Register(skill2)
+	_ = registry.Register(skill1)
+	_ = registry.Register(skill2)
 
 	if registry.Count() != 2 {
 		t.Fatalf("expected 2 skills, got: %d", registry.Count())

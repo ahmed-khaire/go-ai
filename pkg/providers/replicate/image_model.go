@@ -63,7 +63,7 @@ func (m *ImageModel) DoGenerate(ctx context.Context, opts *provider.ImageGenerat
 	}
 
 	if resp.StatusCode != 201 && resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Replicate API returned status %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("replicate API returned status %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	var prediction replicateImagePrediction

@@ -216,7 +216,7 @@ func TestTracker_ExperimentIDTakesPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	defer tracker.Shutdown(context.Background())
+	defer tracker.Shutdown(context.Background()) //nolint:errcheck
 
 	// When both are provided, ExperimentID should be used
 	// This is reflected in the headers but we can't directly test
@@ -277,7 +277,7 @@ func TestURLParsing(t *testing.T) {
 			}
 
 			if tracker != nil {
-				tracker.Shutdown(context.Background())
+				_ = tracker.Shutdown(context.Background())
 			}
 		})
 	}

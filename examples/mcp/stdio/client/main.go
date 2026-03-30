@@ -83,7 +83,7 @@ func (c *MCPClient) Call(method string, params map[string]interface{}) (map[stri
 }
 
 func (c *MCPClient) Close() error {
-	c.stdin.Close()
+	_ = c.stdin.Close()
 	return c.cmd.Wait()
 }
 
@@ -92,7 +92,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck
 
 	// Initialize
 	fmt.Println("=== Initializing MCP Client ===")
