@@ -88,34 +88,127 @@ func main() {
 
 > **Note:** Prodia supports additional model IDs. Check the [Prodia documentation](https://docs.prodia.com/) for the full list of available models.
 
-## Language model
+## Language Model
 
-Prodia's language model handles img2img generation via multipart form-data. It accepts a text prompt and an optional input image and returns a transformed image along with an optional text description.
+Prodia's language model handles img2img generation via multipart form-data. It accepts a text prompt and an optional input image and returns a transformed image along with an optional text description. Because Prodia does not expose SSE for this endpoint, `DoStream` wraps `DoGenerate` and emits the result as a synchronous chunk sequence.
+
+### Model IDs
+
+| Model ID | Description |
+|----------|-------------|
+| `inference.nano-banana.img2img.v2` | Nano Banana image-to-image (default) |
+
+### DoGenerate Example
 
 ```go
-model, err := prov.LanguageModel("inference.nano-banana.img2img.v2")
-if err != nil {
-    log.Fatal(err)
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/digitallysavvy/go-ai/pkg/provider"
+    "github.com/digitallysavvy/go-ai/pkg/provider/types"
+    "github.com/digitallysavvy/go-ai/pkg/providers/prodia"
+)
+
+func main() {
+    prov := prodia.New(prodia.Config{})
+
+    model, err := prov.LanguageModel("inference.nano-banana.img2img.v2")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    result, err := model.DoGenerate(context.Background(),
+        &provider.GenerateOptions{
+            Prompt: types.Prompt{
+                Messages: []types.Message{
+                    {
+                        Role: types.RoleUser,
+                        Content: []types.ContentPart{
+                            types.TextContent{Text: "Transform this image into a watercolor painting"},
+                            types.ImageContent{Image: imageBytes, MimeType: "image/png"},
+                        },
+                    },
+                },
+            },
+            ProviderOptions: map[string]interface{}{
+                "prodia": map[string]interface{}{
+                    "aspectRatio": "16:9",
+                },
+            },
+        })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("Finish reason: %s\n", result.FinishReason)
+    fmt.Printf("Content parts: %d\n", len(result.Content))
 }
 ```
 
-## Video model
+The language model does not support temperature, topP, topK, maxTokens, stopSequences, tools, toolChoice, responseFormat, or reasoning. Unsupported options emit warnings but do not cause failures.
 
-Prodia supports text-to-video and image-to-video generation with Wan 2.2 Lightning models.
+## Video Models
+
+Prodia supports text-to-video (T2V) and image-to-video (I2V) generation with Wan 2.2 Lightning models. Text-to-video requests are sent as JSON; image-to-video requests are sent as multipart/form-data.
+
+### Model IDs
+
+| Model ID | Type | Description |
+|----------|------|-------------|
+| `inference.wan2-2.lightning.txt2vid.v0` | T2V | Wan 2.2 Lightning text-to-video (default) |
+| `inference.wan2-2.lightning.img2vid.v0` | I2V | Wan 2.2 Lightning image-to-video |
+
+### Text-to-Video Example
 
 ```go
 model, err := prov.VideoModel("inference.wan2-2.lightning.txt2vid.v0")
 if err != nil {
     log.Fatal(err)
 }
+
+result, err := model.DoGenerate(context.Background(),
+    &provider.VideoModelV3CallOptions{
+        Prompt:      "A sunrise over mountains in 4K",
+        AspectRatio: "16:9",
+    })
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Video MIME: %s\n", result.Videos[0].MediaType)
+fmt.Printf("Video bytes: %d\n", len(result.Videos[0].Binary))
 ```
 
-### Video model IDs
+### Image-to-Video Example
 
-| Model ID | Type | Description |
-|----------|------|-------------|
-| `inference.wan2-2.lightning.txt2vid.v0` | T2V | Text-to-video generation |
-| `inference.wan2-2.lightning.img2vid.v0` | I2V | Image-to-video generation |
+```go
+model, err := prov.VideoModel("inference.wan2-2.lightning.img2vid.v0")
+if err != nil {
+    log.Fatal(err)
+}
+
+result, err := model.DoGenerate(context.Background(),
+    &provider.VideoModelV3CallOptions{
+        Prompt:      "The cat slowly turns its head",
+        AspectRatio: "9:16",
+        Image: &provider.VideoModelV3File{
+            Type:      "file",
+            Data:      imageBytes,
+            MediaType: "image/png",
+        },
+    })
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Video bytes: %d\n", len(result.Videos[0].Binary))
+```
+
+Max videos per call is 1.
 
 ## Image size
 

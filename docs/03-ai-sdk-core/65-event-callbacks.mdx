@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/teilomillet/go-ai/pkg/ai"
-	"github.com/teilomillet/go-ai/pkg/providers/openai"
+	"github.com/digitallysavvy/go-ai/pkg/ai"
+	"github.com/digitallysavvy/go-ai/pkg/providers/openai"
 )
 
 func main() {
@@ -59,6 +59,8 @@ func main() {
 | `OnStepFinishEvent` | `OnStepFinishEvent` | Called when a step (LLM call) completes. |
 | `OnFinishEvent` | `OnFinishEvent` | Called when the entire generation completes (all steps finished). |
 
+All six callbacks receive `(ctx context.Context, event <EventType>)` and are panic-safe. They fire in addition to the legacy `OnStepFinish` and `OnFinish` callbacks.
+
 ### Embed / EmbedMany
 
 | Callback | Event type | Description |
@@ -66,12 +68,16 @@ func main() {
 | `ExperimentalOnStart` | `EmbedOnStartEvent` | Called before the embedding model is invoked. |
 | `ExperimentalOnFinish` | `EmbedOnFinishEvent` | Called after the embedding model returns. |
 
+Embed callbacks receive `(event <EventType>)` without a context parameter.
+
 ### Rerank
 
 | Callback | Event type | Description |
 |----------|-----------|-------------|
 | `ExperimentalOnStart` | `RerankOnStartEvent` | Called before the reranking model is invoked. |
 | `ExperimentalOnFinish` | `RerankOnFinishEvent` | Called after the reranking model returns. |
+
+Rerank callbacks receive `(event <EventType>)` without a context parameter.
 
 ## Event reference
 
@@ -107,7 +113,7 @@ Called before each step (LLM call) begins. Useful for tracking multi-step genera
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `StepNumber` | `int` | Zero-based index of the current step. |
+| `StepNumber` | `int` | 1-indexed step number. |
 | `ModelProvider` | `string` | The provider name. |
 | `ModelID` | `string` | The model identifier. |
 | `System` | `string` | The system message for this step. |
@@ -127,7 +133,7 @@ Called before a tool's `Execute` function runs.
 | `ToolCallID` | `string` | Unique identifier for this tool call. |
 | `ToolName` | `string` | Name of the tool being called. |
 | `Args` | `map[string]any` | Input arguments passed to the tool. |
-| `StepNumber` | `int` | Zero-based step index where this tool call occurs. |
+| `StepNumber` | `int` | 1-indexed step where this tool call occurs. |
 | `ModelProvider` | `string` | The provider name. |
 | `ModelID` | `string` | The model identifier. |
 | `Messages` | `[]types.Message` | The conversation messages at tool execution time. |
@@ -137,7 +143,7 @@ Called before a tool's `Execute` function runs.
 
 #### OnToolCallFinishEvent
 
-Called after a tool's `Execute` function completes or errors.
+Called after a tool's `Execute` function completes or errors. Exactly one of `Result` or `Error` will be non-nil.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -147,7 +153,7 @@ Called after a tool's `Execute` function completes or errors.
 | `Result` | `any` | The tool's return value (nil on error). |
 | `Error` | `error` | The error from tool execution (nil on success). |
 | `DurationMs` | `int64` | Execution time of the tool call in milliseconds. |
-| `StepNumber` | `int` | Zero-based step index where this tool call occurred. |
+| `StepNumber` | `int` | 1-indexed step where this tool call occurred. |
 | `ModelProvider` | `string` | The provider name. |
 | `ModelID` | `string` | The model identifier. |
 | `Messages` | `[]types.Message` | The conversation messages at tool execution time. |
@@ -161,7 +167,7 @@ Called after each step (LLM call) completes.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `StepNumber` | `int` | Zero-based index of this step. |
+| `StepNumber` | `int` | 1-indexed step number. |
 | `ModelProvider` | `string` | The provider name. |
 | `ModelID` | `string` | The model identifier. |
 | `Text` | `string` | The generated text from this step. |
@@ -181,12 +187,12 @@ Called when the entire generation completes (all steps finished). Includes aggre
 | Field | Type | Description |
 |-------|------|-------------|
 | `Text` | `string` | The full generated text. |
-| `ToolCalls` | `[]types.ToolCall` | Tool calls from the final step. |
-| `ToolResults` | `[]types.ToolResult` | Tool results from the final step. |
+| `ToolCalls` | `[]types.ToolCall` | Tool calls aggregated across all steps. |
+| `ToolResults` | `[]types.ToolResult` | Tool results aggregated across all steps. |
 | `FinishReason` | `types.FinishReason` | Why the final step finished. |
 | `Steps` | `[]types.StepResult` | Results from all steps in the generation. |
 | `TotalUsage` | `types.Usage` | Aggregated token usage across all steps. |
-| `Warnings` | `[]types.Warning` | Warnings from the provider. |
+| `Warnings` | `[]types.Warning` | Warnings aggregated across all steps. |
 | `ExperimentalContext` | `interface{}` | Final state of the user-defined context. |
 | `FunctionID` | `string` | Telemetry function identifier. |
 | `Metadata` | `map[string]any` | Additional telemetry metadata. |
@@ -284,8 +290,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/teilomillet/go-ai/pkg/ai"
-	"github.com/teilomillet/go-ai/pkg/providers/openai"
+	"github.com/digitallysavvy/go-ai/pkg/ai"
+	"github.com/digitallysavvy/go-ai/pkg/providers/openai"
 )
 
 func main() {
@@ -331,8 +337,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/teilomillet/go-ai/pkg/ai"
-	"github.com/teilomillet/go-ai/pkg/providers/openai"
+	"github.com/digitallysavvy/go-ai/pkg/ai"
+	"github.com/digitallysavvy/go-ai/pkg/providers/openai"
 )
 
 func main() {
@@ -377,8 +383,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/teilomillet/go-ai/pkg/ai"
-	"github.com/teilomillet/go-ai/pkg/providers/openai"
+	"github.com/digitallysavvy/go-ai/pkg/ai"
+	"github.com/digitallysavvy/go-ai/pkg/providers/openai"
 )
 
 func main() {
@@ -408,7 +414,7 @@ func main() {
 
 ## Error handling
 
-Errors that occur inside callbacks are caught internally and **do not break** the generation, embedding, or reranking flow. This ensures that monitoring code cannot disrupt your application:
+Errors that occur inside callbacks are caught internally and **do not break** the generation, embedding, or reranking flow. The `Notify` helper wraps each callback invocation in a deferred recover, so panics are silently absorbed. This ensures that monitoring code cannot disrupt your application:
 
 ```go
 result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
