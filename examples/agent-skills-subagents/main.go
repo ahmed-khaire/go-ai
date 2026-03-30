@@ -55,7 +55,7 @@ func main() {
 			return strings.Join(formatted, "\n"), nil
 		},
 	}
-	mainAgent.AddSkill(formatSkill)
+	_ = mainAgent.AddSkill(formatSkill)
 
 	// ========================================================================
 	// Create content analysis subagent with skills
@@ -103,8 +103,8 @@ func main() {
 		},
 	}
 
-	contentAgent.AddSkill(sentimentSkill)
-	contentAgent.AddSkill(readabilitySkill)
+	_ = contentAgent.AddSkill(sentimentSkill)
+	_ = contentAgent.AddSkill(readabilitySkill)
 
 	// ========================================================================
 	// Create summarization subagent with skills
@@ -136,13 +136,13 @@ func main() {
 			return fmt.Sprintf("Keywords: %s", strings.Join(keywords, ", ")), nil
 		},
 	}
-	summaryAgent.AddSkill(extractKeywordsSkill)
+	_ = summaryAgent.AddSkill(extractKeywordsSkill)
 
 	// ========================================================================
 	// Register subagents with main agent
 	// ========================================================================
-	mainAgent.AddSubagent("content_analyzer", contentAgent)
-	mainAgent.AddSubagent("summarizer", summaryAgent)
+	_ = mainAgent.AddSubagent("content_analyzer", contentAgent)
+	_ = mainAgent.AddSubagent("summarizer", summaryAgent)
 
 	// ========================================================================
 	// Demo: Process a document using skills and subagents

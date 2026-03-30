@@ -63,7 +63,7 @@ func main() {
 			return fmt.Sprintf("Search results for '%s': [simulated results]", input), nil
 		},
 	}
-	researchAgent.AddSkill(searchSkill)
+	_ = researchAgent.AddSkill(searchSkill)
 
 	// Create analysis subagent
 	analysisConfig := agent.AgentConfig{
@@ -82,7 +82,7 @@ func main() {
 			return fmt.Sprintf("Statistics: %d words, %d characters", len(words), len(input)), nil
 		},
 	}
-	analysisAgent.AddSkill(statsSkill)
+	_ = analysisAgent.AddSkill(statsSkill)
 
 	// Register subagents with main agent
 	if err := mainAgent.AddSubagent("research", researchAgent); err != nil {

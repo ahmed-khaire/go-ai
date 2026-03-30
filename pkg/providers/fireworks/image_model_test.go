@@ -55,7 +55,7 @@ func newAsyncTestServer(t *testing.T, modelID, requestID string, pollResponses [
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 
 		case pollPath:
 			idx := ts.pollCallCount
@@ -134,7 +134,7 @@ func TestDoGenerateAsync_ImmediateSuccess(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			pollCalled = true
 			imageURL := ts.server.URL + "/fake-image"
@@ -192,7 +192,7 @@ func TestDoGenerateAsync_MultiPollSuccess(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			idx := ts.pollCallCount
 			ts.pollCallCount++
@@ -257,7 +257,7 @@ func TestDoGenerateAsync_SubmitRequestBody(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 			ts.submitBody = body
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")
@@ -557,7 +557,7 @@ func TestDoGenerateAsync_Warnings(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")

@@ -160,7 +160,7 @@ func main() {
 			return string(runes), nil
 		},
 	}
-	agentInstance.AddSkill(enhancedReverseSkill)
+	_ = agentInstance.AddSkill(enhancedReverseSkill)
 	fmt.Printf("Skills after re-adding enhanced 'reverse': %d\n", len(agentInstance.ListSkills()))
 
 	enhancedResult, _ := agentInstance.ExecuteSkill(context.Background(), "reverse", "hello")

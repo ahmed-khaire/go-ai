@@ -849,7 +849,7 @@ func TestPolling_PollsUntilSuccess(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "poll-test-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "poll-test-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/poll-test-id", func(w http.ResponseWriter, r *http.Request) {
@@ -857,9 +857,9 @@ func TestPolling_PollsUntilSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if pollCount < 3 {
-			fmt.Fprintln(w, `{"id": "poll-test-id", "status": "processing"}`)
+			_, _ = fmt.Fprintln(w, `{"id": "poll-test-id", "status": "processing"}`)
 		} else {
-			fmt.Fprintln(w, `{"id": "poll-test-id", "status": "succeeded", "content": {"video_url": "https://cdn.example.com/final.mp4"}, "usage": {"completion_tokens": 100}}`)
+			_, _ = fmt.Fprintln(w, `{"id": "poll-test-id", "status": "succeeded", "content": {"video_url": "https://cdn.example.com/final.mp4"}, "usage": {"completion_tokens": 100}}`)
 		}
 	})
 

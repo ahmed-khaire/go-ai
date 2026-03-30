@@ -228,7 +228,7 @@ func postMultipartToProdia(ctx context.Context, reqURL, apiKey string, body *byt
 	if err != nil {
 		return nil, nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

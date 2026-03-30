@@ -43,7 +43,7 @@ func TestVideoModel_TextToVideo(t *testing.T) {
 			assert.Equal(t, "A cat playing piano", body["prompt"])
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
@@ -52,7 +52,7 @@ func TestVideoModel_TextToVideo(t *testing.T) {
 			assert.Equal(t, http.MethodGet, r.Method)
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url":      "https://example.com/video.mp4",
@@ -108,12 +108,12 @@ func TestVideoModel_ImageToVideo(t *testing.T) {
 			assert.Contains(t, image, "url")
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -162,12 +162,12 @@ func TestVideoModel_ImageToVideo_Base64(t *testing.T) {
 			assert.Contains(t, image["url"], "data:image/png;base64,")
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -217,12 +217,12 @@ func TestVideoModel_VideoEditing(t *testing.T) {
 			assert.Equal(t, "https://example.com/source.mp4", video["url"])
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/edited.mp4",
@@ -269,12 +269,12 @@ func TestVideoModel_WithDuration(t *testing.T) {
 			assert.Equal(t, 10.0, body["duration"])
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -316,12 +316,12 @@ func TestVideoModel_WithAspectRatio(t *testing.T) {
 			assert.Equal(t, "16:9", body["aspect_ratio"])
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -386,12 +386,12 @@ func TestVideoModel_WithResolution(t *testing.T) {
 					assert.Equal(t, tt.expectedInBody, body["resolution"])
 
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"request_id": "test-request-id",
 					})
 				} else {
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"status": "done",
 						"video": map[string]interface{}{
 							"url": "https://example.com/video.mp4",
@@ -434,12 +434,12 @@ func TestVideoModel_WithProviderResolution(t *testing.T) {
 			assert.Equal(t, "720p", body["resolution"])
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -478,12 +478,12 @@ func TestVideoModel_UnsupportedOptions_Warnings(t *testing.T) {
 
 		if requestCount == 1 {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -534,12 +534,12 @@ func TestVideoModel_VideoEditing_UnsupportedOptions_Warnings(t *testing.T) {
 
 		if requestCount == 1 {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -590,20 +590,20 @@ func TestVideoModel_CustomPollInterval(t *testing.T) {
 		switch requestCount {
 		case 1:
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		case 2:
 			// First poll - return pending
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "pending",
 			})
 		default:
 			// Second poll - return done
 			pollDuration = time.Since(pollStart)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -646,12 +646,12 @@ func TestVideoModel_StatusExpired(t *testing.T) {
 
 		if requestCount == 1 {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "expired",
 			})
 		}
@@ -678,7 +678,7 @@ func TestVideoModel_StatusExpired(t *testing.T) {
 func TestVideoModel_NoRequestID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			// Missing request_id
 		})
 	}))
@@ -708,12 +708,12 @@ func TestVideoModel_NoVideoURL(t *testing.T) {
 
 		if requestCount == 1 {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				// Missing video or video.url
 			})
@@ -746,12 +746,12 @@ func TestXAIVideoModerationError(t *testing.T) {
 
 		if requestCount == 1 {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url":               "https://example.com/video.mp4",
@@ -794,12 +794,12 @@ func TestXAIVideoPassthroughOptions(t *testing.T) {
 		if requestCount == 1 {
 			json.NewDecoder(r.Body).Decode(&capturedBody) //nolint:errcheck
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",
@@ -845,12 +845,12 @@ func TestXAIVideoCostMetadata(t *testing.T) {
 
 		if requestCount == 1 {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"request_id": "test-request-id",
 			})
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "done",
 				"video": map[string]interface{}{
 					"url": "https://example.com/video.mp4",

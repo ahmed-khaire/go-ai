@@ -98,7 +98,7 @@ func generateUserProfile(ctx context.Context, model provider.LanguageModel) {
 		"additionalProperties": false,
 	})
 
-	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{
+	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{ //nolint:staticcheck
 		Model:  model,
 		Prompt: "Generate a user profile for John Smith, age 28, who is a moderator",
 		Schema: userSchema,
@@ -171,7 +171,7 @@ func generateProductReview(ctx context.Context, model provider.LanguageModel) {
 		"required": []string{"productName", "rating", "title", "comment", "pros", "cons", "verified", "helpful"},
 	})
 
-	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{
+	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{ //nolint:staticcheck
 		Model:  model,
 		Prompt: "Generate a 4-star review for a wireless keyboard. It should be balanced with both positives and negatives.",
 		Schema: reviewSchema,
@@ -247,7 +247,7 @@ func classifyEmail(ctx context.Context, model provider.LanguageModel) {
 	Please respond ASAP.
 	`
 
-	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{
+	result, err := ai.GenerateObject(ctx, ai.GenerateObjectOptions{ //nolint:staticcheck
 		Model:  model,
 		Prompt: fmt.Sprintf("Classify this email and extract key information:\n%s", emailText),
 		Schema: classificationSchema,

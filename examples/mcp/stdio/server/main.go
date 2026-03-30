@@ -249,7 +249,7 @@ func (s *MCPServer) errorResponse(id interface{}, code int, message, data string
 
 func (s *MCPServer) sendError(encoder *json.Encoder, id interface{}, code int, message, data string) {
 	response := s.errorResponse(id, code, message, data)
-	encoder.Encode(response)
+	_ = encoder.Encode(response)
 }
 
 func main() {

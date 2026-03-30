@@ -61,7 +61,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		Prompt string `json:"prompt"`
 	}
 
-	json.NewDecoder(r.Body).Decode(&req)
+	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextOptions{
 		Model:  model,

@@ -63,7 +63,7 @@ func (p *Provider) LanguageModel(modelID string) (provider.LanguageModel, error)
 
 // EmbeddingModel returns an embedding model by ID
 func (p *Provider) EmbeddingModel(modelID string) (provider.EmbeddingModel, error) {
-	return nil, fmt.Errorf("Replicate embeddings require custom implementation")
+	return nil, fmt.Errorf("replicate embeddings require custom implementation")
 }
 
 // ImageModel returns an image generation model by ID
@@ -79,7 +79,7 @@ func (p *Provider) ImageModel(modelID string) (provider.ImageModel, error) {
 // modelID should be the full version string (e.g., "chenxwh/minimax-video-01-i2v:...")
 func (p *Provider) VideoModel(modelID string) (provider.VideoModelV3, error) {
 	if modelID == "" {
-		return nil, fmt.Errorf("Replicate requires a model version ID for video generation")
+		return nil, fmt.Errorf("replicate requires a model version ID for video generation")
 	}
 
 	return NewVideoModel(p, modelID), nil
@@ -87,12 +87,12 @@ func (p *Provider) VideoModel(modelID string) (provider.VideoModelV3, error) {
 
 // SpeechModel returns a speech synthesis model by ID
 func (p *Provider) SpeechModel(modelID string) (provider.SpeechModel, error) {
-	return nil, fmt.Errorf("Replicate does not directly support speech synthesis through this interface")
+	return nil, fmt.Errorf("replicate does not directly support speech synthesis through this interface")
 }
 
 // TranscriptionModel returns a speech-to-text model by ID
 func (p *Provider) TranscriptionModel(modelID string) (provider.TranscriptionModel, error) {
-	return nil, fmt.Errorf("Replicate does not directly support transcription through this interface")
+	return nil, fmt.Errorf("replicate does not directly support transcription through this interface")
 }
 
 // RerankingModel returns a reranking model by ID

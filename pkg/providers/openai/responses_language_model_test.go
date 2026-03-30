@@ -61,7 +61,7 @@ func TestResponsesLanguageModel_DoGenerate_Text(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(mockResponsesResponse("resp_test", want))
+		_ = json.NewEncoder(w).Encode(mockResponsesResponse("resp_test", want))
 	}))
 	defer server.Close()
 
@@ -147,7 +147,7 @@ func TestResponsesLanguageModel_DoGenerate_ToolCall(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(responses.ResponsesAPIResponse{
+		_ = json.NewEncoder(w).Encode(responses.ResponsesAPIResponse{
 			ID:    "resp_tool",
 			Model: "gpt-4o",
 			Output: []json.RawMessage{callItem},

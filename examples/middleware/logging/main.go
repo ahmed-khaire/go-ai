@@ -196,7 +196,7 @@ func main() {
 	}
 
 	for _, prompt := range prompts {
-		loggingMiddleware.GenerateText(ctx, model, prompt, ai.GenerateTextOptions{
+		_, _ = loggingMiddleware.GenerateText(ctx, model, prompt, ai.GenerateTextOptions{
 			Model:  model,
 			Prompt: prompt,
 		})
@@ -211,7 +211,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer jsonLogger.Close()
+	defer jsonLogger.Close() //nolint:errcheck
 
 	jsonMiddleware := NewLoggingMiddleware(jsonLogger)
 
@@ -303,7 +303,7 @@ func showLogPreview(filename string, lines int) {
 		fmt.Printf("   Failed to open log file: %v\n", err)
 		return
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	decoder := json.NewDecoder(file)
 	count := 0

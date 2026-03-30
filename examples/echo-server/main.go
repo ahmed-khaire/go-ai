@@ -382,7 +382,7 @@ func customHTTPErrorHandler(err error, c echo.Context) {
 	}
 
 	if !c.Response().Committed {
-		c.JSON(code, map[string]interface{}{
+		_ = c.JSON(code, map[string]interface{}{
 			"error":     message,
 			"requestId": c.Response().Header().Get(echo.HeaderXRequestID),
 			"timestamp": time.Now().Unix(),

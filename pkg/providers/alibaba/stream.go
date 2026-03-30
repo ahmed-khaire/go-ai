@@ -227,7 +227,7 @@ func (s *alibabaStream) flushToolCalls() {
 		}
 		var argsMap map[string]interface{}
 		if acc.Args.Len() > 0 {
-			json.Unmarshal([]byte(acc.Args.String()), &argsMap)
+			_ = json.Unmarshal([]byte(acc.Args.String()), &argsMap) //nolint:errcheck
 		}
 		s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
 			Type: provider.ChunkTypeToolCall,

@@ -42,7 +42,7 @@ func (s *MCPHTTPServer) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prompt string `json:"prompt"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	model, _ := s.provider.LanguageModel("gpt-4")
 	toolsArray := make([]types.Tool, 0, len(s.tools))

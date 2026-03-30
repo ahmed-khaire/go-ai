@@ -165,7 +165,7 @@ func TestDownload_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("delayed"))
+		_, _ = w.Write([]byte("delayed"))
 	}))
 	defer server.Close()
 
@@ -189,7 +189,7 @@ func TestDownload_ContextTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("delayed"))
+		_, _ = w.Write([]byte("delayed"))
 	}))
 	defer server.Close()
 

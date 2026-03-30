@@ -438,17 +438,17 @@ func (fc *FileCache) Get(key string) (*CacheEntry, bool) {
 
 func (fc *FileCache) Set(key string, entry *CacheEntry) {
 	fc.memory.Set(key, entry)
-	fc.save()
+	_ = fc.save()
 }
 
 func (fc *FileCache) Delete(key string) {
 	fc.memory.Delete(key)
-	fc.save()
+	_ = fc.save()
 }
 
 func (fc *FileCache) Clear() {
 	fc.memory.Clear()
-	fc.save()
+	_ = fc.save()
 }
 
 func (fc *FileCache) Stats() CacheStats {

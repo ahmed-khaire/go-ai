@@ -729,7 +729,7 @@ func TestVideoModel_SSEErrorEventStructured(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, "data: %s\n\n", tt.sseError)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", tt.sseError)
 			}))
 			defer server.Close()
 

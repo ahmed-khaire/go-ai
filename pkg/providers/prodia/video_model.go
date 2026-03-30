@@ -228,7 +228,7 @@ func resolveVideoImage(ctx context.Context, file *provider.VideoModelV3File) ([]
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to fetch image URL: %w", err)
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to read image URL response: %w", err)
