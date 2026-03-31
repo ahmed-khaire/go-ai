@@ -236,11 +236,11 @@ func (m *VideoModel) readSSEVideoResponse(ctx context.Context, body io.Reader) (
 			return nil, ctx.Err()
 		default:
 		}
-		return nil, fmt.Errorf("SSE stream read error: %w", err)
+		return nil, fmt.Errorf("LSSE stream read error: %w", err)
 	}
 
 	// Stream ended without a result or error event
-	return nil, fmt.Errorf("SSE stream ended without completion event")
+	return nil, fmt.Errorf("LSSE stream ended without completion event")
 }
 
 // buildResponseFromSSEEvent converts a result SSEVideoEvent into a VideoModelV3Response.

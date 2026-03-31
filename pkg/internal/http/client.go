@@ -136,7 +136,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	// Perform request
 	httpResp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("LHTTP request failed: %w", err)
 	}
 	defer httpResp.Body.Close() //nolint:errcheck
 
@@ -162,7 +162,7 @@ func (c *Client) DoJSON(ctx context.Context, req Request, result interface{}) er
 
 	// Check for error status codes
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(resp.Body))
+		return fmt.Errorf("LHTTP %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	// Decode JSON response
@@ -183,7 +183,7 @@ func (c *Client) DoJSONResponse(ctx context.Context, req Request, result interfa
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("LHTTP %d: %s", resp.StatusCode, string(resp.Body))
 	}
 	if err := json.Unmarshal(resp.Body, result); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON response: %w", err)
@@ -241,14 +241,14 @@ func (c *Client) DoStream(ctx context.Context, req Request) (*http.Response, err
 	// Perform request
 	httpResp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("LHTTP request failed: %w", err)
 	}
 
 	// Check for error status codes
 	if httpResp.StatusCode >= 400 {
 		defer httpResp.Body.Close() //nolint:errcheck
 		errBody, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(errBody))
+		return nil, fmt.Errorf("LHTTP %d: %s", httpResp.StatusCode, string(errBody))
 	}
 
 	// Return the response for streaming (caller must close Body)

@@ -309,7 +309,7 @@ func TestImageModel_DoGenerate_Error_InvalidStatus(t *testing.T) {
 	// Create mock server that returns error status
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "Invalid request"}`))
+		_, _ = w.Write([]byte(`{"error": "Invalid request"}`))
 	}))
 	defer server.Close()
 

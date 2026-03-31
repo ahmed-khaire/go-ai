@@ -301,7 +301,7 @@ func main() {
 		log.Printf("Error generating tasks: %v\n", err)
 	} else {
 		var tasks []Task
-		json.Unmarshal([]byte(tasksResult.Text), &tasks)
+		_ = json.Unmarshal([]byte(tasksResult.Text), &tasks)
 		fmt.Printf("Generated %d tasks:\n", len(tasks))
 		for i, task := range tasks {
 			fmt.Printf("  %d. %s (%s priority, %dh)\n",

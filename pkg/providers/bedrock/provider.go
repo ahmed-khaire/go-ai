@@ -103,19 +103,19 @@ func (p *Provider) ImageModel(modelID string) (provider.ImageModel, error) {
 // SpeechModel returns a speech synthesis model by ID
 func (p *Provider) SpeechModel(modelID string) (provider.SpeechModel, error) {
 	// Bedrock doesn't provide TTS models directly
-	return nil, fmt.Errorf("AWS Bedrock does not support speech synthesis")
+	return nil, fmt.Errorf("LAWS Bedrock does not support speech synthesis")
 }
 
 // TranscriptionModel returns a speech-to-text model by ID
 func (p *Provider) TranscriptionModel(modelID string) (provider.TranscriptionModel, error) {
 	// Bedrock doesn't provide STT models directly
-	return nil, fmt.Errorf("AWS Bedrock does not support transcription")
+	return nil, fmt.Errorf("LAWS Bedrock does not support transcription")
 }
 
 // RerankingModel returns a reranking model by ID
 func (p *Provider) RerankingModel(modelID string) (provider.RerankingModel, error) {
 	// Bedrock doesn't provide reranking models directly
-	return nil, fmt.Errorf("AWS Bedrock does not support reranking")
+	return nil, fmt.Errorf("LAWS Bedrock does not support reranking")
 }
 
 // Client returns the HTTP client for making API requests

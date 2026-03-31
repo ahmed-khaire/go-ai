@@ -77,7 +77,7 @@ func newAsyncTestServer(t *testing.T, modelID, requestID string, pollResponses [
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -146,7 +146,7 @@ func TestDoGenerateAsync_ImmediateSuccess(t *testing.T) {
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -212,7 +212,7 @@ func TestDoGenerateAsync_MultiPollSuccess(t *testing.T) {
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -268,7 +268,7 @@ func TestDoGenerateAsync_SubmitRequestBody(t *testing.T) {
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 	ts.server = httptest.NewServer(mux)
 	defer ts.server.Close()
@@ -568,7 +568,7 @@ func TestDoGenerateAsync_Warnings(t *testing.T) {
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 	ts.server = httptest.NewServer(mux)
 	defer ts.server.Close()

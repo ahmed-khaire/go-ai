@@ -216,7 +216,7 @@ func TestResponsesLanguageModel_DoStream_Text(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DoStream failed: %v", err)
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var textChunks []string
 	var finishChunk *provider.StreamChunk
@@ -283,7 +283,7 @@ func TestResponsesLanguageModel_DoStream_ToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DoStream failed: %v", err)
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var toolChunk *provider.StreamChunk
 	for {

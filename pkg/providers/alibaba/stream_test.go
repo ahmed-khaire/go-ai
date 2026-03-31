@@ -25,7 +25,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -67,7 +67,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -121,7 +121,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -162,7 +162,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -204,7 +204,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -245,7 +245,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -280,7 +280,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -321,7 +321,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -360,7 +360,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -396,7 +396,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {

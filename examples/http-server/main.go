@@ -362,7 +362,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(health)
+	_ = json.NewEncoder(w).Encode(health)
 }
 
 // corsMiddleware adds CORS headers to all responses
@@ -386,16 +386,16 @@ func corsMiddleware(next http.Handler) http.Handler {
 func sendError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: message})
 }
 
 // sendSSE sends a Server-Sent Event
 func sendSSE(w http.ResponseWriter, event, data string) {
 	if event != "" {
-		fmt.Fprintf(w, "event: %s\n", event)
+		_, _ = fmt.Fprintf(w, "event: %s\n", event)
 	}
 	if data != "" {
-		fmt.Fprintf(w, "data: %s\n", data)
+		_, _ = fmt.Fprintf(w, "data: %s\n", data)
 	}
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "\n")
 }

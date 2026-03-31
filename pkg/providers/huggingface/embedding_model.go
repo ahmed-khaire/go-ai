@@ -70,7 +70,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Hugging Face API returned status %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("hugging face API returned status %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	embedding, err := m.parseEmbeddingResponse(resp.Body)
@@ -115,7 +115,7 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts 
 		}
 
 		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("Hugging Face API returned status %d: %s", resp.StatusCode, string(resp.Body))
+			return nil, fmt.Errorf("hugging face API returned status %d: %s", resp.StatusCode, string(resp.Body))
 		}
 
 		embedding, err := m.parseEmbeddingResponse(resp.Body)
@@ -162,7 +162,7 @@ func (m *EmbeddingModel) parseEmbeddingResponse(body []byte) ([]float64, error) 
 	// Try error format
 	var errorResp hfErrorResponse
 	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error != "" {
-		return nil, fmt.Errorf("Hugging Face API error: %s", errorResp.Error)
+		return nil, fmt.Errorf("hugging face API error: %s", errorResp.Error)
 	}
 
 	return nil, fmt.Errorf("unexpected response format from Hugging Face: %s", string(body))

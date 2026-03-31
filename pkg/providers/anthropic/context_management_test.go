@@ -555,7 +555,7 @@ func TestDoGenerate_WithContextManagement(t *testing.T) {
 
 				// Return mock response
 				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(tt.responseJSON))
+				_, _ = w.Write([]byte(tt.responseJSON))
 			}))
 			defer server.Close()
 

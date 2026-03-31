@@ -48,7 +48,7 @@ func (m *SpeechModel) DoGenerate(ctx context.Context, opts *provider.SpeechGener
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("OpenAI TTS API returned status %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("LOpenAI TTS API returned status %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	return &types.SpeechResult{

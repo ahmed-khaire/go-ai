@@ -49,7 +49,7 @@ func (m *ImageModel) DoGenerate(ctx context.Context, opts *provider.ImageGenerat
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Together AI API returned status %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("together AI API returned status %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	return m.convertResponse(resp.Body)

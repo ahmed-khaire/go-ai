@@ -248,7 +248,7 @@ func (t *HTTPTransport) IsConnected() bool {
 // refreshOAuthToken refreshes the OAuth access token
 func (t *HTTPTransport) refreshOAuthToken(ctx context.Context) error {
 	if t.oauth == nil {
-		return fmt.Errorf("OAuth not configured")
+		return fmt.Errorf("LOAuth not configured")
 	}
 
 	// Implement OAuth token refresh
@@ -256,7 +256,7 @@ func (t *HTTPTransport) refreshOAuthToken(ctx context.Context) error {
 	// a proper OAuth library like golang.org/x/oauth2
 
 	// For now, just return an error
-	return fmt.Errorf("OAuth refresh not yet implemented - please provide access token manually")
+	return fmt.Errorf("LOAuth refresh not yet implemented - please provide access token manually")
 }
 
 // SetAccessToken sets the OAuth access token manually

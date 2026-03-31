@@ -221,10 +221,10 @@ func defaultKeyFunc(opts ai.GenerateTextOptions) string {
 	h.Write([]byte(opts.System))
 
 	if opts.Temperature != nil {
-		fmt.Fprintf(h, "%f", *opts.Temperature)
+		_, _ = fmt.Fprintf(h, "%f", *opts.Temperature)
 	}
 	if opts.MaxTokens != nil {
-		fmt.Fprintf(h, "%d", *opts.MaxTokens)
+		_, _ = fmt.Fprintf(h, "%d", *opts.MaxTokens)
 	}
 
 	return hex.EncodeToString(h.Sum(nil))

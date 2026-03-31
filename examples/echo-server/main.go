@@ -395,7 +395,7 @@ func sendSSE(w http.ResponseWriter, event, data string) {
 		_, _ = fmt.Fprintf(w, "event: %s\n", event)
 	}
 	if data != "" {
-		fmt.Fprintf(w, "data: %s\n", data)
+		_, _ = fmt.Fprintf(w, "data: %s\n", data)
 	}
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "\n")
 }

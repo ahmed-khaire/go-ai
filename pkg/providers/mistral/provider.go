@@ -83,7 +83,7 @@ func (p *Provider) TranscriptionModel(modelID string) (provider.TranscriptionMod
 
 // RerankingModel returns a reranking model by ID
 func (p *Provider) RerankingModel(modelID string) (provider.RerankingModel, error) {
-	return nil, fmt.Errorf("Mistral AI does not support reranking")
+	return nil, fmt.Errorf("mistral AI does not support reranking")
 }
 
 // Client returns the HTTP client for making API requests

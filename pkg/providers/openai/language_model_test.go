@@ -151,9 +151,9 @@ func TestPromptCacheRetentionWithStreaming(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 
 		// Send chunk
-		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n"))
 		// Send done
-		w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
 
@@ -555,11 +555,11 @@ func TestDoStreamFinishReasonMapping(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 
 				// Send a text chunk first
-				w.Write([]byte(`data: {"choices":[{"delta":{"content":"Hi"}}]}` + "\n\n"))
+				_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"Hi"}}]}` + "\n\n"))
 				// Send finish chunk with the OpenAI finish reason
-				w.Write([]byte(fmt.Sprintf(`data: {"choices":[{"delta":{},"finish_reason":"%s"}]}`, tt.openAIFinishReason) + "\n\n"))
+				_, _ = w.Write([]byte(fmt.Sprintf(`data: {"choices":[{"delta":{},"finish_reason":"%s"}]}`, tt.openAIFinishReason) + "\n\n"))
 				// Send done
-				w.Write([]byte("data: [DONE]\n\n"))
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
 			}))
 			defer server.Close()
 
@@ -618,16 +618,16 @@ func TestDoStreamToolCallChunks(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 
 		// A short text delta
-		w.Write([]byte(`data: {"choices":[{"delta":{"content":"Sure!"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"Sure!"}}]}` + "\n\n"))
 		// First tool call delta: id + name + empty args
-		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}` + "\n\n"))
 		// Second tool call delta: partial arguments
-		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"location\":"}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"location\":"}}]}}]}` + "\n\n"))
 		// Third tool call delta: remaining arguments
-		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"New York\"}"}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"New York\"}"}}]}}]}` + "\n\n"))
 		// Finish with tool_calls reason
-		w.Write([]byte(`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
 
@@ -704,12 +704,12 @@ func TestDoStreamToolCallDeltaNullType(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 
 		// First delta carries id + name with a null "type" field.
-		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_nulltype","type":null,"function":{"name":"greet","arguments":""}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_nulltype","type":null,"function":{"name":"greet","arguments":""}}]}}]}` + "\n\n"))
 		// Second delta has partial arguments and omits "type" entirely.
-		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"name\":\"world\"}"}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"name\":\"world\"}"}}]}}]}` + "\n\n"))
 		// Finish
-		w.Write([]byte(`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
 

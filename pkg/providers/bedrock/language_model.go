@@ -117,7 +117,7 @@ func (m *LanguageModel) DoGenerate(ctx context.Context, opts *provider.GenerateO
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("AWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("LAWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return m.convertResponse(respBody)

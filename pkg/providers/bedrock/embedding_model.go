@@ -157,7 +157,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provid
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("AWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("LAWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	// Parse response based on model type

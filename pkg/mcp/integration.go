@@ -47,7 +47,7 @@ func (c *MCPToolConverter) convertTool(mcpTool MCPTool) types.Tool {
 			// Call MCP tool
 			result, err := c.client.CallTool(ctx, mcpTool.Name, input)
 			if err != nil {
-				return nil, fmt.Errorf("MCP tool execution failed: %w", err)
+				return nil, fmt.Errorf("LMCP tool execution failed: %w", err)
 			}
 
 			// Check if the tool returned an error

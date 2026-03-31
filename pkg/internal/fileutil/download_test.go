@@ -213,7 +213,7 @@ func TestDownload_CustomHeaders(t *testing.T) {
 			t.Errorf("expected custom header %q, got %q", expectedValue, r.Header.Get("X-Custom-Header"))
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer server.Close()
 
@@ -274,7 +274,7 @@ func TestDownloadToWriter_Success(t *testing.T) {
 	content := []byte("test content")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write(content)
+		_, _ = w.Write(content)
 	}))
 	defer server.Close()
 

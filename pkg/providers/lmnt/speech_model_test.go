@@ -46,7 +46,7 @@ func TestSpeechModel_DoGenerate(t *testing.T) {
 		// Return mock audio response
 		w.Header().Set("Content-Type", "audio/mpeg")
 		w.WriteHeader(http.StatusOK)
-		w.Write(mockAudioData)
+		_, _ = w.Write(mockAudioData)
 	}))
 	defer server.Close()
 
@@ -129,7 +129,7 @@ func TestSpeechModel_ErrorHandling(t *testing.T) {
 	// Create test server that returns error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "Invalid API key"}`))
+		_, _ = w.Write([]byte(`{"error": "Invalid API key"}`))
 	}))
 	defer server.Close()
 
