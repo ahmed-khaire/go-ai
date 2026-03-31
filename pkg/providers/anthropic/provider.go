@@ -90,31 +90,31 @@ func (p *Provider) LanguageModelWithOptions(modelID string, options *ModelOption
 // EmbeddingModel returns an embedding model by ID
 func (p *Provider) EmbeddingModel(modelID string) (provider.EmbeddingModel, error) {
 	// Anthropic doesn't provide embedding models
-	return nil, fmt.Errorf("Anthropic does not support embedding models")
+	return nil, fmt.Errorf("anthropic does not support embedding models")
 }
 
 // ImageModel returns an image generation model by ID
 func (p *Provider) ImageModel(modelID string) (provider.ImageModel, error) {
 	// Anthropic doesn't provide image generation models
-	return nil, fmt.Errorf("Anthropic does not support image generation")
+	return nil, fmt.Errorf("anthropic does not support image generation")
 }
 
 // SpeechModel returns a speech synthesis model by ID
 func (p *Provider) SpeechModel(modelID string) (provider.SpeechModel, error) {
 	// Anthropic doesn't provide speech synthesis models
-	return nil, fmt.Errorf("Anthropic does not support speech synthesis")
+	return nil, fmt.Errorf("anthropic does not support speech synthesis")
 }
 
 // TranscriptionModel returns a speech-to-text model by ID
 func (p *Provider) TranscriptionModel(modelID string) (provider.TranscriptionModel, error) {
 	// Anthropic doesn't provide transcription models
-	return nil, fmt.Errorf("Anthropic does not support transcription")
+	return nil, fmt.Errorf("LAnthropic does not support transcription")
 }
 
 // RerankingModel returns a reranking model by ID
 func (p *Provider) RerankingModel(modelID string) (provider.RerankingModel, error) {
 	// Anthropic doesn't provide reranking models
-	return nil, fmt.Errorf("Anthropic does not support reranking")
+	return nil, fmt.Errorf("LAnthropic does not support reranking")
 }
 
 // Client returns the HTTP client for making API requests

@@ -819,7 +819,7 @@ func TestStreamingUsageWithNoMessageStart(t *testing.T) {
 
 	stream := newAnthropicStream(io.NopCloser(strings.NewReader(sseData)), false)
 
-	stream.Next() // text chunk
+	_, _ = stream.Next() // text chunk //nolint:errcheck
 	finishChunk, err := stream.Next()
 	if err != nil {
 		t.Fatalf("Next() error: %v", err)

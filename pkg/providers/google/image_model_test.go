@@ -161,7 +161,7 @@ func TestImageModel_DoGenerate_Imagen(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -249,7 +249,7 @@ func TestImageModel_DoGenerate_Gemini(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -286,7 +286,7 @@ func TestImageModel_DoGenerate_Error_EmptyResponse(t *testing.T) {
 			}{},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -309,7 +309,7 @@ func TestImageModel_DoGenerate_Error_InvalidStatus(t *testing.T) {
 	// Create mock server that returns error status
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "Invalid request"}`))
+		_, _ = w.Write([]byte(`{"error": "Invalid request"}`))
 	}))
 	defer server.Close()
 
@@ -378,7 +378,7 @@ func TestImageModel_DoGenerate_Gemini31FlashImagePreview(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -585,7 +585,7 @@ func TestResolveImageSize(t *testing.T) {
 func TestImageModel_DoGenerate_WithAspectRatioField(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 
 		params := reqBody["parameters"].(map[string]interface{})
 		assert.Equal(t, "21:9", params["aspectRatio"],
@@ -604,7 +604,7 @@ func TestImageModel_DoGenerate_WithAspectRatioField(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -692,7 +692,7 @@ func TestImageModel_DoGenerate_Gemini_ErrorMultipleImages(t *testing.T) {
 func TestImageModel_DoGenerate_Imagen_DefaultAspectRatio(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 
 		params := reqBody["parameters"].(map[string]interface{})
 		assert.Equal(t, "1:1", params["aspectRatio"], "should default to 1:1 when no aspectRatio/size provided")
@@ -710,7 +710,7 @@ func TestImageModel_DoGenerate_Imagen_DefaultAspectRatio(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -731,7 +731,7 @@ func TestImageModel_DoGenerate_Imagen_DefaultAspectRatio(t *testing.T) {
 func TestImageModel_DoGenerate_Imagen_PersonGeneration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 
 		params := reqBody["parameters"].(map[string]interface{})
 		assert.Equal(t, "allow_adult", params["personGeneration"])
@@ -749,7 +749,7 @@ func TestImageModel_DoGenerate_Imagen_PersonGeneration(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -774,7 +774,7 @@ func TestImageModel_DoGenerate_Imagen_PersonGeneration(t *testing.T) {
 func TestImageModel_DoGenerate_Gemini_WithSeed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 
 		genConfig := reqBody["generationConfig"].(map[string]interface{})
 		assert.Equal(t, float64(42), genConfig["seed"], "seed should be passed in generationConfig")
@@ -811,7 +811,7 @@ func TestImageModel_DoGenerate_Gemini_WithSeed(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 

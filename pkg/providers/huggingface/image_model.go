@@ -50,7 +50,7 @@ func (m *ImageModel) DoGenerate(ctx context.Context, opts *provider.ImageGenerat
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Hugging Face API returned status %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("LHugging Face API returned status %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	return m.convertResponse(resp.Body)
@@ -69,7 +69,7 @@ func (m *ImageModel) buildRequestBody(opts *provider.ImageGenerateOptions) map[s
 
 	if opts.Size != "" {
 		var width, height int
-		fmt.Sscanf(opts.Size, "%dx%d", &width, &height)
+		_, _ = fmt.Sscanf(opts.Size, "%dx%d", &width, &height)
 		if width > 0 && height > 0 {
 			parameters["width"] = width
 			parameters["height"] = height
@@ -90,7 +90,7 @@ func (m *ImageModel) convertResponse(body []byte) (*types.ImageResult, error) {
 	// Check if it's an error response (JSON)
 	var errorResp hfErrorResponse
 	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error != "" {
-		return nil, fmt.Errorf("Hugging Face API error: %s", errorResp.Error)
+		return nil, fmt.Errorf("LHugging Face API error: %s", errorResp.Error)
 	}
 
 	// If not an error, treat as image data

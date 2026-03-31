@@ -6,6 +6,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 	"github.com/digitallysavvy/go-ai/pkg/testutil"
 )
@@ -67,7 +68,7 @@ func TestEmbed_Error(t *testing.T) {
 
 	expectedErr := errors.New("embedding failed")
 	model := &testutil.MockEmbeddingModel{
-		DoEmbedFunc: func(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+		DoEmbedFunc: func(ctx context.Context, input string, _ *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 			return nil, expectedErr
 		},
 	}
@@ -142,7 +143,7 @@ func TestEmbedMany_Error(t *testing.T) {
 
 	expectedErr := errors.New("batch embedding failed")
 	model := &testutil.MockEmbeddingModel{
-		DoEmbedManyFunc: func(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+		DoEmbedManyFunc: func(ctx context.Context, inputs []string, _ *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 			return nil, expectedErr
 		},
 	}

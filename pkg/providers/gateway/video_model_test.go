@@ -71,14 +71,6 @@ func TestVideoModel_MaxVideosPerCall(t *testing.T) {
 	}
 }
 
-// writeSSSEEvent writes a single SSE event to a ResponseWriter.
-func writeSSEEvent(w http.ResponseWriter, eventType, data string) {
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, data)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
 func TestVideoModel_DoGenerate_SSE(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -221,7 +213,7 @@ data: {"type":"heartbeat","timestamp":1234567891}
 
 				// Write any pre-result SSE events
 				for _, ev := range tt.sseEvents {
-					fmt.Fprint(w, ev)
+					_, _ = fmt.Fprint(w, ev) //nolint:errcheck
 					if f, ok := w.(http.Flusher); ok {
 						f.Flush()
 					}
@@ -229,7 +221,7 @@ data: {"type":"heartbeat","timestamp":1234567891}
 
 				// Write the result/error event
 				if tt.resultEvent != "" {
-					fmt.Fprintf(w, "data: %s\n\n", tt.resultEvent)
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", tt.resultEvent) //nolint:errcheck
 					if f, ok := w.(http.Flusher); ok {
 						f.Flush()
 					}
@@ -281,7 +273,7 @@ func TestVideoModel_DoGenerate_SSE_ContextCancellation(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 
 		// Send one heartbeat
-		fmt.Fprint(w, "event: heartbeat\ndata: {\"type\":\"heartbeat\",\"timestamp\":1234}\n\n")
+		_, _ = fmt.Fprint(w, "event: heartbeat\ndata: {\"type\":\"heartbeat\",\"timestamp\":1234}\n\n") //nolint:errcheck
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
@@ -336,7 +328,7 @@ func TestVideoModel_DoGenerate_SSE_StreamEndedWithoutCompletion(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		// Send only heartbeats then close without result
-		fmt.Fprint(w, "event: heartbeat\ndata: {\"type\":\"heartbeat\",\"timestamp\":1234}\n\n")
+		_, _ = fmt.Fprint(w, "event: heartbeat\ndata: {\"type\":\"heartbeat\",\"timestamp\":1234}\n\n") //nolint:errcheck
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
@@ -368,7 +360,7 @@ func TestVideoModel_DoGenerate_Timeout(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/video.mp4","mediaType":"video/mp4"}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/video.mp4","mediaType":"video/mp4"}]}`) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -410,7 +402,7 @@ func TestVideoModel_DoGenerate_AcceptHeader(t *testing.T) {
 		capturedAccept = r.Header.Get("Accept")
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/video.mp4","mediaType":"video/mp4"}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/video.mp4","mediaType":"video/mp4"}]}`) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -577,7 +569,7 @@ func TestVideoModel_ModelIDHeader(t *testing.T) {
 		capturedModelID = r.Header.Get("ai-model-id")
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
 	}))
 	defer server.Close()
 
@@ -636,7 +628,7 @@ func TestVideoModel_ProviderOptionsAlwaysSent(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
 			}))
 			defer server.Close()
 
@@ -670,7 +662,7 @@ func TestVideoModel_URLImageEncoding(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"result","videos":[{"type":"url","url":"https://example.com/v.mp4","mediaType":"video/mp4"}]}`)
 	}))
 	defer server.Close()
 
@@ -737,7 +729,7 @@ func TestVideoModel_SSEErrorEventStructured(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, "data: %s\n\n", tt.sseError)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", tt.sseError)
 			}))
 			defer server.Close()
 

@@ -169,12 +169,12 @@ func main() {
 
 	// Example 1: Console logging (verbose)
 	fmt.Println("1. Verbose Console Logging")
-	fmt.Println("   " + string(make([]byte, 40, 40)))
+	fmt.Println("   " + string(make([]byte, 40)))
 
 	consoleLogger := &ConsoleLogger{Verbose: true}
 	loggingMiddleware := NewLoggingMiddleware(consoleLogger)
 
-	result, err := loggingMiddleware.GenerateText(ctx, model, "What is the capital of France?", ai.GenerateTextOptions{
+	_, err = loggingMiddleware.GenerateText(ctx, model, "What is the capital of France?", ai.GenerateTextOptions{
 		Model:  model,
 		Prompt: "What is the capital of France?",
 	})
@@ -184,7 +184,7 @@ func main() {
 
 	// Example 2: Console logging (concise)
 	fmt.Println("\n2. Concise Console Logging")
-	fmt.Println("   " + string(make([]byte, 40, 40)))
+	fmt.Println("   " + string(make([]byte, 40)))
 
 	consoleLogger.Verbose = false
 
@@ -196,7 +196,7 @@ func main() {
 	}
 
 	for _, prompt := range prompts {
-		loggingMiddleware.GenerateText(ctx, model, prompt, ai.GenerateTextOptions{
+		_, _ = loggingMiddleware.GenerateText(ctx, model, prompt, ai.GenerateTextOptions{
 			Model:  model,
 			Prompt: prompt,
 		})
@@ -205,13 +205,13 @@ func main() {
 
 	// Example 3: JSON file logging
 	fmt.Println("\n3. JSON File Logging")
-	fmt.Println("   " + string(make([]byte, 40, 40)))
+	fmt.Println("   " + string(make([]byte, 40)))
 
 	jsonLogger, err := NewJSONLogger("ai-requests.jsonl")
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer jsonLogger.Close()
+	defer jsonLogger.Close() //nolint:errcheck
 
 	jsonMiddleware := NewLoggingMiddleware(jsonLogger)
 
@@ -223,7 +223,7 @@ func main() {
 
 	for i, query := range queries {
 		fmt.Printf("   Request %d: %s\n", i+1, truncate(query, 40))
-		result, err = jsonMiddleware.GenerateText(ctx, model, query, ai.GenerateTextOptions{
+		_, err = jsonMiddleware.GenerateText(ctx, model, query, ai.GenerateTextOptions{
 			Model:  model,
 			Prompt: query,
 		})
@@ -241,7 +241,7 @@ func main() {
 
 	// Example 4: Multi-logger (console + file)
 	fmt.Println("\n4. Multi-Logger (Console + File)")
-	fmt.Println("   " + string(make([]byte, 40, 40)))
+	fmt.Println("   " + string(make([]byte, 40)))
 
 	multiLogger := &MultiLogger{
 		loggers: []Logger{
@@ -252,7 +252,7 @@ func main() {
 
 	multiMiddleware := NewLoggingMiddleware(multiLogger)
 
-	result, err = multiMiddleware.GenerateText(ctx, model, "What is machine learning?", ai.GenerateTextOptions{
+	result, err := multiMiddleware.GenerateText(ctx, model, "What is machine learning?", ai.GenerateTextOptions{
 		Model:  model,
 		Prompt: "What is machine learning?",
 	})
@@ -264,7 +264,7 @@ func main() {
 
 	// Show log file preview
 	fmt.Println("\n5. Log File Preview")
-	fmt.Println("   " + string(make([]byte, 40, 40)))
+	fmt.Println("   " + string(make([]byte, 40)))
 
 	showLogPreview("ai-requests.jsonl", 3)
 }
@@ -303,7 +303,7 @@ func showLogPreview(filename string, lines int) {
 		fmt.Printf("   Failed to open log file: %v\n", err)
 		return
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	decoder := json.NewDecoder(file)
 	count := 0

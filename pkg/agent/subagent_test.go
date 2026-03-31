@@ -65,7 +65,7 @@ func TestSubagentRegistry_Get(t *testing.T) {
 	registry := NewSubagentRegistry()
 	agent := &mockAgent{}
 
-	registry.Register("research", agent)
+	_ = registry.Register("research", agent)
 
 	// Test getting existing subagent
 	retrieved, exists := registry.Get("research")
@@ -87,7 +87,7 @@ func TestSubagentRegistry_Has(t *testing.T) {
 	registry := NewSubagentRegistry()
 	agent := &mockAgent{}
 
-	registry.Register("research", agent)
+	_ = registry.Register("research", agent)
 
 	if !registry.Has("research") {
 		t.Fatal("expected subagent to exist")
@@ -102,7 +102,7 @@ func TestSubagentRegistry_Unregister(t *testing.T) {
 	registry := NewSubagentRegistry()
 	agent := &mockAgent{}
 
-	registry.Register("research", agent)
+	_ = registry.Register("research", agent)
 
 	if !registry.Has("research") {
 		t.Fatal("expected subagent to exist")
@@ -120,8 +120,8 @@ func TestSubagentRegistry_List(t *testing.T) {
 	agent1 := &mockAgent{}
 	agent2 := &mockAgent{}
 
-	registry.Register("research", agent1)
-	registry.Register("analysis", agent2)
+	_ = registry.Register("research", agent1)
+	_ = registry.Register("analysis", agent2)
 
 	names := registry.List()
 	if len(names) != 2 {
@@ -149,7 +149,7 @@ func TestSubagentRegistry_Execute(t *testing.T) {
 		},
 	}
 
-	registry.Register("research", agent)
+	_ = registry.Register("research", agent)
 
 	// Test successful execution
 	result, err := registry.Execute(context.Background(), "research", "find information")
@@ -178,7 +178,7 @@ func TestSubagentRegistry_ExecuteWithMessages(t *testing.T) {
 		},
 	}
 
-	registry.Register("research", agent)
+	_ = registry.Register("research", agent)
 
 	messages := []types.Message{
 		{
@@ -211,8 +211,8 @@ func TestSubagentRegistry_Clear(t *testing.T) {
 	agent1 := &mockAgent{}
 	agent2 := &mockAgent{}
 
-	registry.Register("research", agent1)
-	registry.Register("analysis", agent2)
+	_ = registry.Register("research", agent1)
+	_ = registry.Register("analysis", agent2)
 
 	if registry.Count() != 2 {
 		t.Fatalf("expected 2 subagents, got: %d", registry.Count())
@@ -233,7 +233,7 @@ func TestSubagentRegistry_Count(t *testing.T) {
 	}
 
 	agent := &mockAgent{}
-	registry.Register("research", agent)
+	_ = registry.Register("research", agent)
 
 	if registry.Count() != 1 {
 		t.Fatalf("expected count 1, got: %d", registry.Count())
@@ -360,7 +360,7 @@ func TestSubagentRegistry_ExecuteWithError(t *testing.T) {
 		},
 	}
 
-	registry.Register("error-agent", agent)
+	_ = registry.Register("error-agent", agent)
 
 	_, err := registry.Execute(context.Background(), "error-agent", "test")
 	if err == nil {

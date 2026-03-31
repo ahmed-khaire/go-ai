@@ -596,7 +596,7 @@ func TestStreamText_WithObjectOutput_PartialOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer result.Close()
+	defer result.Close() //nolint:errcheck
 
 	text, err := result.ReadAll()
 	if err != nil {

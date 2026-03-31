@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
@@ -59,7 +60,7 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	// Determine model type and construct request body accordingly
 	var reqBody map[string]interface{}
 
@@ -123,6 +124,13 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
+	// Forward caller-supplied headers.
+	if opts != nil {
+		for k, v := range opts.Headers {
+			req.Header.Set(k, v)
+		}
+	}
+
 	// Sign the request with AWS Signature V4
 	signer := NewAWSSigner(
 		m.provider.config.AWSAccessKeyID,
@@ -141,7 +149,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 	if err != nil {
 		return nil, providererrors.NewProviderError("aws-bedrock", 0, "", err.Error(), err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -149,7 +157,7 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("AWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("LAWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	// Parse response based on model type
@@ -192,24 +200,27 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 			InputTokens: inputTokens,
 			TotalTokens: inputTokens,
 		},
+		Response: types.EmbeddingResponse{Headers: map[string][]string(resp.Header)},
 	}, nil
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	var embeddings [][]float64
 	var totalTokens int
+	responses := make([]types.EmbeddingResponse, 0, len(inputs))
 
 	// Process each input individually
 	// Bedrock embeddings typically don't support batch processing
 	for _, input := range inputs {
-		result, err := m.DoEmbed(ctx, input)
+		result, err := m.DoEmbed(ctx, input, opts)
 		if err != nil {
 			return nil, err
 		}
 
 		embeddings = append(embeddings, result.Embedding)
 		totalTokens += result.Usage.InputTokens
+		responses = append(responses, result.Response)
 	}
 
 	return &types.EmbeddingsResult{
@@ -218,5 +229,6 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 			InputTokens: totalTokens,
 			TotalTokens: totalTokens,
 		},
+		Responses: responses,
 	}, nil
 }

@@ -185,7 +185,7 @@ func TestWrapProvider_EmbeddingModel_WithMiddleware(t *testing.T) {
 	}
 
 	// Call embed to verify middleware is applied
-	_, err = model.DoEmbed(context.Background(), "test input")
+	_, err = model.DoEmbed(context.Background(), "test input", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestWrapProvider_BothMiddlewares(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_, err = embedModel.DoEmbed(context.Background(), "test")
+	_, err = embedModel.DoEmbed(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

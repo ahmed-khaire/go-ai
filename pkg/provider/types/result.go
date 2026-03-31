@@ -31,6 +31,19 @@ type GenerateResult struct {
 
 	// Warnings from the provider
 	Warnings []Warning `json:"warnings,omitempty"`
+
+	// ProviderMetadata holds provider-specific metadata keyed by provider name.
+	// Example: map[string]interface{}{"googleVertex": map[string]interface{}{"finishMessage": "..."}}
+	ProviderMetadata map[string]interface{} `json:"providerMetadata,omitempty"`
+}
+
+// EmbeddingResponse contains metadata about the HTTP response from the embedding provider.
+type EmbeddingResponse struct {
+	// Headers are the raw response headers from the provider.
+	Headers map[string][]string `json:"headers,omitempty"`
+
+	// Body is the raw response body from the provider (for debugging).
+	Body interface{} `json:"body,omitempty"`
 }
 
 // EmbeddingResult contains the result of an embedding operation
@@ -40,6 +53,12 @@ type EmbeddingResult struct {
 
 	// Usage information
 	Usage EmbeddingUsage `json:"usage"`
+
+	// Warnings are any non-fatal warnings emitted by the provider (e.g. unsupported settings).
+	Warnings []Warning `json:"warnings,omitempty"`
+
+	// Response holds provider HTTP response metadata (headers, body).
+	Response EmbeddingResponse `json:"response,omitempty"`
 }
 
 // EmbeddingsResult contains the results of a batch embedding operation
@@ -49,6 +68,13 @@ type EmbeddingsResult struct {
 
 	// Usage information
 	Usage EmbeddingUsage `json:"usage"`
+
+	// Warnings are any non-fatal warnings emitted by the provider.
+	Warnings []Warning `json:"warnings,omitempty"`
+
+	// Responses holds per-request HTTP response metadata. One entry per batch call
+	// (most providers make a single call for the whole batch).
+	Responses []EmbeddingResponse `json:"responses,omitempty"`
 }
 
 // ImageResult contains the result of an image generation operation
@@ -67,6 +93,10 @@ type ImageResult struct {
 
 	// Warnings from the provider
 	Warnings []Warning `json:"warnings,omitempty"`
+
+	// ProviderMetadata holds provider-specific metadata (e.g. cost tracking).
+	// Keyed by provider name (e.g. "xai").
+	ProviderMetadata map[string]interface{} `json:"providerMetadata,omitempty"`
 }
 
 // SpeechResult contains the result of a speech synthesis operation
@@ -165,6 +195,10 @@ type StepResult struct {
 
 	// Warnings from this step
 	Warnings []Warning `json:"warnings,omitempty"`
+
+	// Sources contains citation or grounding references for this step.
+	// Populated by filtering SourceContent parts from the provider response.
+	Sources []SourceContent `json:"sources,omitempty"`
 
 	// Response messages generated in this step
 	// Contains the assistant message with any text and tool calls

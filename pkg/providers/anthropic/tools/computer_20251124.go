@@ -116,24 +116,38 @@ type Computer20251124Args struct {
 //	    DisplayHeightPx: 1080,
 //	    EnableZoom: true,
 //	})
+// computer20251124Opts holds the per-instance configuration for computer_20251124 and
+// implements anthropicAPIMapper so the Anthropic converter sends display params to the API.
+type computer20251124Opts struct {
+	Args Computer20251124Args
+}
+
+// ToAnthropicAPIMap returns the full Anthropic API representation of this computer tool.
+func (o *computer20251124Opts) ToAnthropicAPIMap() map[string]interface{} {
+	m := map[string]interface{}{
+		"type":              "computer_20251124",
+		"name":              "computer",
+		"display_width_px":  o.Args.DisplayWidthPx,
+		"display_height_px": o.Args.DisplayHeightPx,
+		"enable_zoom":       o.Args.EnableZoom,
+	}
+	if o.Args.DisplayNumber != nil {
+		m["display_number"] = *o.Args.DisplayNumber
+	}
+	return m
+}
+
 func Computer20251124(args Computer20251124Args) types.Tool {
-	// Build tool name
-	toolName := "anthropic.computer_20251124"
-
-	// Build parameters schema
-	parameters := buildComputer20251124Schema(args.EnableZoom)
-
-	tool := types.Tool{
-		Name:        toolName,
+	return types.Tool{
+		Name:        "anthropic.computer_20251124",
 		Description: buildComputerDescription(args),
-		Parameters:  parameters,
+		Parameters:  buildComputer20251124Schema(args.EnableZoom),
 		Execute: func(ctx context.Context, input map[string]interface{}, options types.ToolExecutionOptions) (interface{}, error) {
 			return nil, fmt.Errorf("computer tool must be executed by the provider (Anthropic). Set ProviderExecuted: true")
 		},
 		ProviderExecuted: true,
+		ProviderOptions:  &computer20251124Opts{Args: args},
 	}
-
-	return tool
 }
 
 func buildComputer20251124Schema(enableZoom bool) map[string]interface{} {

@@ -3,7 +3,6 @@ package fireworks
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -116,7 +115,7 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 	if opts.TopP != nil {
 		body["top_p"] = *opts.TopP
 	}
-	if opts.StopSequences != nil && len(opts.StopSequences) > 0 {
+	if len(opts.StopSequences) > 0 {
 		body["stop"] = opts.StopSequences
 	}
 	if len(opts.Tools) > 0 {
@@ -128,6 +127,21 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 	if opts.ResponseFormat != nil {
 		body["response_format"] = map[string]interface{}{
 			"type": opts.ResponseFormat.Type,
+		}
+	}
+	// Map top-level Reasoning to Fireworks reasoning_effort.
+	// none and provider-default → omit (Fireworks passes through the raw level string
+	// and only accepts supported values; none is excluded at the base layer).
+	// minimal/low → "low", medium → "medium", high/xhigh → "high".
+	if opts.Reasoning != nil {
+		switch *opts.Reasoning {
+		case types.ReasoningMinimal, types.ReasoningLow:
+			body["reasoning_effort"] = "low"
+		case types.ReasoningMedium:
+			body["reasoning_effort"] = "medium"
+		case types.ReasoningHigh, types.ReasoningXHigh:
+			body["reasoning_effort"] = "high"
+		// ReasoningNone and ReasoningDefault: omit
 		}
 	}
 
@@ -176,12 +190,15 @@ func (m *LanguageModel) convertResponse(response fireworksResponse) *types.Gener
 		Usage:        convertFireworksUsage(response.Usage),
 		RawResponse:  response,
 	}
+	if choice.Message.ReasoningContent != "" {
+		result.Content = append(result.Content, types.ReasoningContent{Text: choice.Message.ReasoningContent})
+	}
 	if len(choice.Message.ToolCalls) > 0 {
 		result.ToolCalls = make([]types.ToolCall, len(choice.Message.ToolCalls))
 		for i, tc := range choice.Message.ToolCalls {
 			var args map[string]interface{}
 			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
 			}
 			result.ToolCalls[i] = types.ToolCall{
 				ID:        tc.ID,
@@ -268,9 +285,10 @@ type fireworksResponse struct {
 		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
 		Message      struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
 				ID       string `json:"id"`
 				Type     string `json:"type"`
 				Function struct {
@@ -301,88 +319,25 @@ type fireworksUsage struct {
 	} `json:"completion_tokens_details,omitempty"`
 }
 
-type fireworksStreamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-	} `json:"choices"`
-}
-
 type fireworksStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+	*streaming.OpenAICompatStream
 }
 
 func newFireworksStream(reader io.ReadCloser) *fireworksStream {
-	return &fireworksStream{reader: reader, parser: streaming.NewSSEParser(reader)}
-}
-
-func (s *fireworksStream) Read(p []byte) (n int, err error)  { return s.reader.Read(p) }
-func (s *fireworksStream) Close() error                       { return s.reader.Close() }
-func (s *fireworksStream) Next() (*provider.StreamChunk, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	event, err := s.parser.Next()
-	if err != nil {
-		s.err = err
-		return nil, err
-	}
-	if streaming.IsStreamDone(event) {
-		s.err = io.EOF
-		return nil, io.EOF
-	}
-	var chunkData fireworksStreamChunk
-	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
-		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
-	}
-	if len(chunkData.Choices) > 0 {
-		choice := chunkData.Choices[0]
-		if choice.Delta.Content != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeText, Text: choice.Delta.Content}, nil
+	s := streaming.NewOpenAICompatStream(reader, providerutils.MapOpenAIFinishReason)
+	s.OnReasoningDelta = func(eventBytes []byte) (string, bool) {
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					ReasoningContent string `json:"reasoning_content"`
+				} `json:"delta"`
+			} `json:"choices"`
 		}
-		if len(choice.Delta.ToolCalls) > 0 {
-			tc := choice.Delta.ToolCalls[0]
-			var args map[string]interface{}
-			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
-			}
-			return &provider.StreamChunk{
-				Type: provider.ChunkTypeToolCall,
-				ToolCall: &types.ToolCall{
-					ID:        tc.ID,
-					ToolName:  tc.Function.Name,
-					Arguments: args,
-				},
-			}, nil
+		if err := json.Unmarshal(eventBytes, &chunk); err != nil || len(chunk.Choices) == 0 {
+			return "", false
 		}
-		if choice.FinishReason != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeFinish, FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason)}, nil
-		}
+		rc := chunk.Choices[0].Delta.ReasoningContent
+		return rc, rc != ""
 	}
-	return s.Next()
-}
-func (s *fireworksStream) Err() error {
-	if s.err == io.EOF {
-		return nil
-	}
-	return s.err
+	return &fireworksStream{OpenAICompatStream: s}
 }

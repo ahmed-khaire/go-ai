@@ -17,9 +17,7 @@ import (
 type testServer struct {
 	server       *httptest.Server
 	requests     []*recordedRequest
-	createBody   map[string]interface{}
-	createStatus string
-	statusBody   string
+	createBody map[string]interface{}
 }
 
 type recordedRequest struct {
@@ -58,10 +56,10 @@ func newTestServer(t *testing.T, createTaskID string, statusResponses []string) 
 			if createTaskID == "" {
 				// Simulate empty id response
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintln(w, `{}`)
+				_, _ = fmt.Fprintln(w, `{}`)
 			} else {
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{"id": %q}`, createTaskID)
+				_, _ = fmt.Fprintf(w, `{"id": %q}`, createTaskID)
 			}
 
 		default:
@@ -88,7 +86,7 @@ func newTestServer(t *testing.T, createTaskID string, statusResponses []string) 
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, statusResponses[idx])
+		_, _ = fmt.Fprintln(w, statusResponses[idx])
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -101,7 +99,7 @@ func newErrorServer(t *testing.T, statusCode int, errorBody string) *httptest.Se
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		fmt.Fprintln(w, errorBody)
+		_, _ = fmt.Fprintln(w, errorBody)
 	})
 	return httptest.NewServer(mux)
 }
@@ -121,11 +119,6 @@ func providerForServer(t *testing.T, serverURL string) *Provider {
 		t.Fatalf("failed to create provider: %v", err)
 	}
 	return prov
-}
-
-var defaultOpts = &provider.VideoModelV3CallOptions{
-	Prompt: "A futuristic city with flying cars",
-	N:      1,
 }
 
 func makeSuccessStatusBody(taskID, videoURL string) string {
@@ -856,7 +849,7 @@ func TestPolling_PollsUntilSuccess(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "poll-test-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "poll-test-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/poll-test-id", func(w http.ResponseWriter, r *http.Request) {
@@ -864,9 +857,9 @@ func TestPolling_PollsUntilSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if pollCount < 3 {
-			fmt.Fprintln(w, `{"id": "poll-test-id", "status": "processing"}`)
+			_, _ = fmt.Fprintln(w, `{"id": "poll-test-id", "status": "processing"}`)
 		} else {
-			fmt.Fprintln(w, `{"id": "poll-test-id", "status": "succeeded", "content": {"video_url": "https://cdn.example.com/final.mp4"}, "usage": {"completion_tokens": 100}}`)
+			_, _ = fmt.Fprintln(w, `{"id": "poll-test-id", "status": "succeeded", "content": {"video_url": "https://cdn.example.com/final.mp4"}, "usage": {"completion_tokens": 100}}`)
 		}
 	})
 
@@ -901,12 +894,12 @@ func TestPolling_TimeoutError(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "timeout-test-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "timeout-test-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/timeout-test-id", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "timeout-test-id", "status": "processing"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "timeout-test-id", "status": "processing"}`)
 	})
 
 	server := httptest.NewServer(mux)
@@ -938,12 +931,12 @@ func TestPolling_ContextCancellation(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "abort-test-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "abort-test-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/abort-test-id", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "abort-test-id", "status": "processing"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "abort-test-id", "status": "processing"}`)
 	})
 
 	server := httptest.NewServer(mux)
@@ -999,12 +992,12 @@ func TestError_TaskFailed(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "failed-task-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "failed-task-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/failed-task-id", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "failed-task-id", "status": "failed"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "failed-task-id", "status": "failed"}`)
 	})
 
 	server := httptest.NewServer(mux)
@@ -1033,13 +1026,13 @@ func TestError_NoVideoURL(t *testing.T) {
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"id": "no-video-task-id"}`)
+		_, _ = fmt.Fprintln(w, `{"id": "no-video-task-id"}`)
 	})
 
 	mux.HandleFunc("/api/v3/contents/generations/tasks/no-video-task-id", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// succeeded but no video_url
-		fmt.Fprintln(w, `{"id": "no-video-task-id", "status": "succeeded", "content": {}}`)
+		_, _ = fmt.Fprintln(w, `{"id": "no-video-task-id", "status": "succeeded", "content": {}}`)
 	})
 
 	server := httptest.NewServer(mux)

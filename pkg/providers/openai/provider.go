@@ -119,7 +119,17 @@ func (p *Provider) TranscriptionModel(modelID string) (provider.TranscriptionMod
 // RerankingModel returns a reranking model by ID
 func (p *Provider) RerankingModel(modelID string) (provider.RerankingModel, error) {
 	// OpenAI doesn't provide reranking models
-	return nil, fmt.Errorf("OpenAI does not support reranking")
+	return nil, fmt.Errorf("LOpenAI does not support reranking")
+}
+
+// ResponsesModel returns a language model that uses the OpenAI Responses API
+// (/v1/responses) instead of Chat Completions. Use this for models that benefit
+// from stateful conversations, tool search, compaction, or Responses-only features.
+func (p *Provider) ResponsesModel(modelID string) (provider.LanguageModel, error) {
+	if modelID == "" {
+		return nil, fmt.Errorf("model ID cannot be empty")
+	}
+	return NewResponsesLanguageModel(p, modelID), nil
 }
 
 // Client returns the HTTP client for making API requests

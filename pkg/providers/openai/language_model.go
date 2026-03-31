@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	"github.com/digitallysavvy/go-ai/pkg/provider"
@@ -111,18 +112,55 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 		"stream": stream,
 	}
 
-	// Convert messages
+	// Extract store flag early — needed before message conversion so we can
+	// filter unencrypted reasoning parts from assistant messages when store=false.
+	// storeExplicit tracks whether the caller set the flag (so we only send it
+	// in the request body when explicitly provided, not by default).
+	store := true // effective value; default is server-side persistence
+	storeExplicit := false
+	if opts.ProviderOptions != nil {
+		if openaiOpts, ok := opts.ProviderOptions["openai"].(map[string]interface{}); ok {
+			if v, ok := openaiOpts["store"].(bool); ok {
+				store = v
+				storeExplicit = true
+			}
+		}
+	}
+
+	// Convert messages, filtering unencrypted reasoning from assistant messages
+	// when store=false. Without server-side persistence the API cannot reconstruct
+	// the reasoning context in subsequent turns, making these parts useless.
+	convertMessages := func(msgs []types.Message) []types.Message {
+		if store {
+			return msgs
+		}
+		filtered := make([]types.Message, len(msgs))
+		copy(filtered, msgs)
+		for i, msg := range filtered {
+			if msg.Role == types.RoleAssistant {
+				filtered[i].Content = filterUnencryptedReasoningParts(msg.Content, false)
+			}
+		}
+		return filtered
+	}
+
 	if opts.Prompt.IsMessages() {
-		body["messages"] = prompt.ToOpenAIMessages(opts.Prompt.Messages)
+		body["messages"] = prompt.ToOpenAIMessages(convertMessages(opts.Prompt.Messages))
 	} else if opts.Prompt.IsSimple() {
 		body["messages"] = prompt.ToOpenAIMessages(prompt.SimpleTextToMessages(opts.Prompt.Text))
 	}
 
-	// Add system message if present
+	// Add system message if present.
+	// Reasoning models (o1, o3, o4-mini, gpt-5.x non-chat) require the
+	// "developer" role instead of "system" per OpenAI's API specification.
 	if opts.Prompt.System != "" {
 		messages := body["messages"].([]map[string]interface{})
+		role := "system"
+		if isReasoningModel(m.modelID) {
+			role = "developer"
+		}
 		systemMsg := map[string]interface{}{
-			"role":    "system",
+			"role":    role,
 			"content": opts.Prompt.System,
 		}
 		body["messages"] = append([]map[string]interface{}{systemMsg}, messages...)
@@ -166,13 +204,39 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 		}
 	}
 
-	// Extract OpenAI-specific provider options
+	// Map top-level Reasoning to OpenAI reasoning_effort.
+	// none → "disabled", minimal/low → "low", medium → "medium", high/xhigh → "high".
+	// provider-default → omit (let OpenAI use its own default).
+	if opts.Reasoning != nil {
+		switch *opts.Reasoning {
+		case types.ReasoningNone:
+			body["reasoning_effort"] = "disabled"
+		case types.ReasoningMinimal, types.ReasoningLow:
+			body["reasoning_effort"] = "low"
+		case types.ReasoningMedium:
+			body["reasoning_effort"] = "medium"
+		case types.ReasoningHigh, types.ReasoningXHigh:
+			body["reasoning_effort"] = "high"
+		// ReasoningDefault: omit
+		}
+	}
+
+	// Apply OpenAI-specific provider options
 	if opts.ProviderOptions != nil {
 		if openaiOpts, ok := opts.ProviderOptions["openai"].(map[string]interface{}); ok {
-			// Add prompt cache retention if present
-			// Supports "in_memory" (default) and "24h" (for gpt-5.1 series)
+			// Add prompt cache retention if present.
+			// Supports "in_memory" (default) and "24h" (for gpt-5.1 series).
 			if promptCacheRetention, ok := openaiOpts["promptCacheRetention"].(string); ok {
 				body["prompt_cache_retention"] = promptCacheRetention
+			}
+			// Forward store only when explicitly set (already extracted above).
+			if storeExplicit {
+				body["store"] = store
+			}
+			// textVerbosity controls the length/detail of the model's text response.
+			// Maps to top-level "verbosity" in the Chat Completions API.
+			if v, ok := openaiOpts["textVerbosity"].(string); ok {
+				body["verbosity"] = v
 			}
 		}
 	}
@@ -202,7 +266,7 @@ func (m *LanguageModel) convertResponse(response openAIResponse) *types.Generate
 			result.ToolCalls = make([]types.ToolCall, len(choice.Message.ToolCalls))
 			for i, tc := range choice.Message.ToolCalls {
 				var args map[string]interface{}
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
 
 				result.ToolCalls[i] = types.ToolCall{
 					ID:        tc.ID,
@@ -356,6 +420,44 @@ type openAIToolCall struct {
 	} `json:"function"`
 }
 
+// filterUnencryptedReasoningParts removes ReasoningContent parts that have no
+// EncryptedContent when store=false. Without server-side storage the API cannot
+// reconstruct the reasoning context in subsequent turns, so these parts are
+// useless and should be dropped from the returned content.
+//
+// When store is true (or the store flag is not set), the slice is returned unchanged.
+func filterUnencryptedReasoningParts(content []types.ContentPart, store bool) []types.ContentPart {
+	if store {
+		return content
+	}
+	result := make([]types.ContentPart, 0, len(content))
+	for _, part := range content {
+		if rc, ok := part.(types.ReasoningContent); ok {
+			if rc.EncryptedContent == "" {
+				// Drop: no encrypted content, cannot be replayed without storage.
+				continue
+			}
+		}
+		result = append(result, part)
+	}
+	return result
+}
+
+// isReasoningModel reports whether modelID is a reasoning model that requires
+// the "developer" role for system messages instead of "system".
+//
+// Uses an allowlist approach — only known reasoning model prefixes are matched.
+// This avoids inadvertently changing the role for fine-tuned or custom models.
+//
+// Matches: o1*, o3*, o4-mini*, gpt-5* (except gpt-5-chat*)
+// Non-matches: gpt-4*, gpt-3.5*, gpt-5-chat-latest, etc.
+func isReasoningModel(modelID string) bool {
+	return strings.HasPrefix(modelID, "o1") ||
+		strings.HasPrefix(modelID, "o3") ||
+		strings.HasPrefix(modelID, "o4-mini") ||
+		(strings.HasPrefix(modelID, "gpt-5") && !strings.HasPrefix(modelID, "gpt-5-chat"))
+}
+
 // openAIStreamAccumToolCall holds partial tool call state accumulated across SSE deltas.
 type openAIStreamAccumToolCall struct {
 	id        string
@@ -485,7 +587,7 @@ func (s *openAIStream) Next() (*provider.StreamChunk, error) {
 				}
 				var args map[string]interface{}
 				if accum.arguments != "" {
-					json.Unmarshal([]byte(accum.arguments), &args)
+					_ = json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
 				}
 				s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
 					Type: provider.ChunkTypeToolCall,

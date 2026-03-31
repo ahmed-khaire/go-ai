@@ -39,7 +39,7 @@ func TestWrapEmbeddingModel_TransformInput(t *testing.T) {
 
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{middleware}, nil, nil)
 
-	_, err := wrapped.DoEmbed(context.Background(), "test input")
+	_, err := wrapped.DoEmbed(context.Background(), "test input", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestWrapEmbeddingModel_WrapEmbed(t *testing.T) {
 
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{middleware}, nil, nil)
 
-	_, err := wrapped.DoEmbed(context.Background(), "test")
+	_, err := wrapped.DoEmbed(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestWrapEmbeddingModel_WrapEmbedMany(t *testing.T) {
 
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{middleware}, nil, nil)
 
-	_, err := wrapped.DoEmbedMany(context.Background(), []string{"test1", "test2"})
+	_, err := wrapped.DoEmbedMany(context.Background(), []string{"test1", "test2"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestWrapEmbeddingModel_MultipleMiddleware(t *testing.T) {
 
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{mw1, mw2}, nil, nil)
 
-	_, err := wrapped.DoEmbed(context.Background(), "test")
+	_, err := wrapped.DoEmbed(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestWrapEmbeddingModel_NoTransformInput(t *testing.T) {
 	middleware := &EmbeddingModelMiddleware{}
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{middleware}, nil, nil)
 
-	_, err := wrapped.DoEmbed(context.Background(), "original input")
+	_, err := wrapped.DoEmbed(context.Background(), "original input", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestWrapEmbeddingModel_NoWrapEmbed(t *testing.T) {
 	middleware := &EmbeddingModelMiddleware{}
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{middleware}, nil, nil)
 
-	result, err := wrapped.DoEmbed(context.Background(), "test")
+	result, err := wrapped.DoEmbed(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestWrapEmbeddingModel_NoWrapEmbedMany(t *testing.T) {
 	middleware := &EmbeddingModelMiddleware{}
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{middleware}, nil, nil)
 
-	result, err := wrapped.DoEmbedMany(context.Background(), []string{"test1", "test2"})
+	result, err := wrapped.DoEmbedMany(context.Background(), []string{"test1", "test2"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestWrapEmbeddingModel_TransformInputError(t *testing.T) {
 
 	wrapped := WrapEmbeddingModel(model, []*EmbeddingModelMiddleware{middleware}, nil, nil)
 
-	_, err := wrapped.DoEmbed(context.Background(), "test")
+	_, err := wrapped.DoEmbed(context.Background(), "test", nil)
 	if err == nil {
 		t.Error("expected error from TransformInput")
 	}

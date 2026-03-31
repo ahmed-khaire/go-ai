@@ -535,7 +535,7 @@ func StreamObject(ctx context.Context, opts StreamObjectOptions) (*GenerateObjec
 
 		return finalResult, nil
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	// Accumulate text and track partial objects
 	var accumulatedText string

@@ -26,14 +26,14 @@ func TestIntegration_CustomTool_WireFormat(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
+		_, _ = fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
 	}))
 	defer server.Close()
 
 	// Build custom tool
 	syntax := "lark"
 	def := `start: WORD`
-	ct := openaitool.NewCustomTool("json-tool",
+	ct := openaitool.NewCustomTool(
 		openaitool.WithDescription("Extract JSON"),
 		openaitool.WithFormat(openaitool.CustomToolFormat{
 			Type:       "grammar",
@@ -42,7 +42,7 @@ func TestIntegration_CustomTool_WireFormat(t *testing.T) {
 		}),
 	)
 
-	tools := PrepareTools([]types.Tool{ct.ToTool()})
+	tools := PrepareTools([]types.Tool{ct.ToTool("json-tool")})
 
 	reqBody := map[string]interface{}{
 		"model": "gpt-4o",
@@ -58,7 +58,7 @@ func TestIntegration_CustomTool_WireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected status: %d", resp.StatusCode)
@@ -90,9 +90,9 @@ func TestIntegration_ShellTools_WireFormat(t *testing.T) {
 	var capturedBody map[string]interface{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedBody)
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
+		_, _ = fmt.Fprint(w, `{"id":"resp_test","output":[]}`)
 	}))
 	defer server.Close()
 
@@ -113,7 +113,7 @@ func TestIntegration_ShellTools_WireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	rawTools := capturedBody["tools"].([]interface{})
 	expectedTypes := []string{"local_shell", "shell", "apply_patch"}
@@ -142,7 +142,7 @@ func TestIntegration_ShellTools_WireFormat(t *testing.T) {
 func TestIntegration_Phase_InResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{
+		_, _ = fmt.Fprint(w, `{
 			"id": "resp_123",
 			"output": [
 				{
@@ -161,7 +161,7 @@ func TestIntegration_Phase_InResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	var body struct {
 		Output []AssistantMessageItem `json:"output"`
@@ -194,12 +194,12 @@ func TestIntegration_LiveOpenAI_CustomTool(t *testing.T) {
 	ctx := context.Background()
 	_ = ctx
 
-	ct := openaitool.NewCustomTool("sentiment-analyzer",
+	ct := openaitool.NewCustomTool(
 		openaitool.WithDescription("Analyze sentiment of text"),
 		openaitool.WithFormat(openaitool.CustomToolFormat{Type: "text"}),
 	)
 
-	tools := PrepareTools([]types.Tool{ct.ToTool()})
+	tools := PrepareTools([]types.Tool{ct.ToTool("sentiment-analyzer")})
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
 	}

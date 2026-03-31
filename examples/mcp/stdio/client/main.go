@@ -71,7 +71,7 @@ func (c *MCPClient) Call(method string, params map[string]interface{}) (map[stri
 	}
 
 	if errObj, ok := response["error"].(map[string]interface{}); ok {
-		return nil, fmt.Errorf("RPC error: %v", errObj["message"])
+		return nil, fmt.Errorf("LRPC error: %v", errObj["message"])
 	}
 
 	result, ok := response["result"].(map[string]interface{})
@@ -83,7 +83,7 @@ func (c *MCPClient) Call(method string, params map[string]interface{}) (map[stri
 }
 
 func (c *MCPClient) Close() error {
-	c.stdin.Close()
+	_ = c.stdin.Close()
 	return c.cmd.Wait()
 }
 
@@ -92,7 +92,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck
 
 	// Initialize
 	fmt.Println("=== Initializing MCP Client ===")

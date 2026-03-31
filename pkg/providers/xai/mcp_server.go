@@ -1,15 +1,17 @@
 package xai
 
-import (
-	"context"
-
-	"github.com/digitallysavvy/go-ai/pkg/provider/types"
-)
+import "github.com/digitallysavvy/go-ai/pkg/provider/types"
 
 // MCPServerConfig contains configuration for the xAI MCP Server tool
 type MCPServerConfig struct {
 	// ServerURL is the URL of the remote MCP server to connect to
 	ServerURL string
+
+	// ServerLabel is a short display label for this MCP server.
+	ServerLabel string
+
+	// ServerDescription describes what this MCP server provides.
+	ServerDescription string
 
 	// AllowedTools is a list of tool names that are allowed to be used from the MCP server
 	// If empty, all tools from the MCP server are allowed
@@ -22,6 +24,17 @@ type MCPServerConfig struct {
 	// Authorization contains the authorization token or credentials
 	// This will be set as the Authorization header
 	Authorization string
+}
+
+// MCPServerOptions holds the typed config used by prepareXAIResponsesTools to serialize
+// the mcp tool into the Responses API request body.
+type MCPServerOptions struct {
+	ServerURL         string
+	ServerLabel       string
+	ServerDescription string
+	AllowedTools      []string
+	Headers           map[string]string
+	Authorization     string
 }
 
 // MCPServer creates a provider-executed tool for connecting to remote MCP servers
@@ -100,20 +113,11 @@ func MCPServer(config MCPServerConfig) types.Tool {
 		Description: "Connect to remote MCP (Model Context Protocol) server and execute tools. Enables integration with external services and APIs through MCP-compatible servers.",
 		Title:       "MCP Server",
 		Parameters:  parameters,
+		// ProviderOptions carries the typed config for API serialization by prepareXAIResponsesTools.
+		ProviderOptions: MCPServerOptions(config),
 		// This tool is executed by xAI's servers, not locally
 		ProviderExecuted: true,
-		// Execute function is not needed for provider-executed tools
-		// The provider will handle execution and return results
-		Execute: func(ctx context.Context, input map[string]interface{}, options types.ToolExecutionOptions) (interface{}, error) {
-			// This should never be called for provider-executed tools
-			// The provider handles execution
-			return nil, &types.ToolExecutionError{
-				ToolCallID:       options.ToolCallID,
-				ToolName:         "xai.mcp",
-				Err:              context.Canceled,
-				ProviderExecuted: true,
-			}
-		},
+		Execute:          providerExecutedNoop("xai.mcp"),
 	}
 }
 

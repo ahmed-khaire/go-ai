@@ -66,7 +66,7 @@ func (m *LanguageModel) DoGenerate(ctx context.Context, opts *provider.GenerateO
 	}
 
 	if resp.StatusCode != 201 && resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Replicate API returned status %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("replicate API returned status %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	var prediction replicatePrediction
@@ -112,11 +112,12 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions) map[str
 				}
 			}
 
-			if msg.Role == "system" {
+			switch msg.Role {
+			case "system":
 				promptText += fmt.Sprintf("System: %s\n", content)
-			} else if msg.Role == "user" {
+			case "user":
 				promptText += fmt.Sprintf("User: %s\n", content)
-			} else if msg.Role == "assistant" {
+			case "assistant":
 				promptText += fmt.Sprintf("Assistant: %s\n", content)
 			}
 		}

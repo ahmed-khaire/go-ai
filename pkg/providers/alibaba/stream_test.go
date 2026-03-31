@@ -25,7 +25,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -67,7 +67,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -79,24 +79,30 @@ data: [DONE]
 		chunks = append(chunks, chunk)
 	}
 
-	// Should have: 2 reasoning + 1 text + 1 finish
-	require.Len(t, chunks, 4)
+	// Should have: reasoning-start + reasoning + reasoning + reasoning-end + text + finish
+	require.Len(t, chunks, 6)
+
+	// Reasoning start
+	assert.Equal(t, provider.ChunkTypeReasoningStart, chunks[0].Type)
 
 	// First reasoning chunk
-	assert.Equal(t, provider.ChunkTypeReasoning, chunks[0].Type)
-	assert.Equal(t, "Let me think...", chunks[0].Reasoning)
+	assert.Equal(t, provider.ChunkTypeReasoning, chunks[1].Type)
+	assert.Equal(t, "Let me think...", chunks[1].Reasoning)
 
 	// Second reasoning chunk
-	assert.Equal(t, provider.ChunkTypeReasoning, chunks[1].Type)
-	assert.Equal(t, " about this problem", chunks[1].Reasoning)
+	assert.Equal(t, provider.ChunkTypeReasoning, chunks[2].Type)
+	assert.Equal(t, " about this problem", chunks[2].Reasoning)
+
+	// Reasoning end + text (text arrives with finish, triggering reasoning-end transition)
+	assert.Equal(t, provider.ChunkTypeReasoningEnd, chunks[3].Type)
 
 	// Text chunk
-	assert.Equal(t, provider.ChunkTypeText, chunks[2].Type)
-	assert.Equal(t, "The answer is 42", chunks[2].Text)
+	assert.Equal(t, provider.ChunkTypeText, chunks[4].Type)
+	assert.Equal(t, "The answer is 42", chunks[4].Text)
 
 	// Finish chunk
-	assert.Equal(t, provider.ChunkTypeFinish, chunks[3].Type)
-	assert.Equal(t, types.FinishReasonStop, chunks[3].FinishReason)
+	assert.Equal(t, provider.ChunkTypeFinish, chunks[5].Type)
+	assert.Equal(t, types.FinishReasonStop, chunks[5].FinishReason)
 }
 
 // TestAlibabaStream_ProcessToolCallChunks tests tool call accumulation
@@ -115,7 +121,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -156,7 +162,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -198,7 +204,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -239,7 +245,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -274,7 +280,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -295,6 +301,87 @@ data: [DONE]
 	assert.Equal(t, provider.ChunkTypeFinish, chunks[1].Type)
 }
 
+// TestAlibabaStream_ToolCallPartialJSONNotFinalized verifies that a tool call whose
+// accumulated arguments happen to form valid JSON mid-stream is NOT emitted early.
+// This is a regression test for the security fix: tool calls must only be finalized
+// at flush time (when finish_reason is received), never based on JSON parsability.
+func TestAlibabaStream_ToolCallPartialJSONNotFinalized(t *testing.T) {
+	// Chunk 2 delivers {"done":true} which IS valid, parseable JSON by itself.
+	// The old (buggy) code would have emitted the tool call at this point.
+	// The fix requires it to wait until finish_reason in chunk 3.
+	sseData := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"fn"}}]},"finish_reason":""}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"done\":true}"}}]},"finish_reason":""}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`
+
+	reader := io.NopCloser(strings.NewReader(sseData))
+	stream := newAlibabaStream(reader)
+	defer stream.Close() //nolint:errcheck
+
+	var chunks []*provider.StreamChunk
+	for {
+		chunk, err := stream.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		chunks = append(chunks, chunk)
+	}
+
+	// Must have exactly: 1 tool_call + 1 finish (not more from premature emission)
+	require.Len(t, chunks, 2)
+
+	assert.Equal(t, provider.ChunkTypeToolCall, chunks[0].Type)
+	assert.Equal(t, "call_1", chunks[0].ToolCall.ID)
+	assert.Equal(t, "fn", chunks[0].ToolCall.ToolName)
+	assert.Equal(t, true, chunks[0].ToolCall.Arguments["done"])
+
+	assert.Equal(t, provider.ChunkTypeFinish, chunks[1].Type)
+	assert.Equal(t, types.FinishReasonToolCalls, chunks[1].FinishReason)
+}
+
+// TestAlibabaStream_ToolCallFinalizedAtFlush verifies that tool call chunks are
+// only emitted after finish_reason, not before.
+func TestAlibabaStream_ToolCallFinalizedAtFlush(t *testing.T) {
+	sseData := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"get_data","arguments":"{\"key\":"}}]},"finish_reason":""}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"value\"}"}}]},"finish_reason":""}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`
+
+	reader := io.NopCloser(strings.NewReader(sseData))
+	stream := newAlibabaStream(reader)
+	defer stream.Close() //nolint:errcheck
+
+	var chunks []*provider.StreamChunk
+	for {
+		chunk, err := stream.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		chunks = append(chunks, chunk)
+	}
+
+	require.Len(t, chunks, 2)
+
+	assert.Equal(t, provider.ChunkTypeToolCall, chunks[0].Type)
+	assert.Equal(t, "call_x", chunks[0].ToolCall.ID)
+	assert.Equal(t, "get_data", chunks[0].ToolCall.ToolName)
+	assert.Equal(t, "value", chunks[0].ToolCall.Arguments["key"])
+
+	assert.Equal(t, provider.ChunkTypeFinish, chunks[1].Type)
+}
+
 // TestAlibabaStream_MixedContent tests mixed text and reasoning content
 func TestAlibabaStream_MixedContent(t *testing.T) {
 	sseData := `data: {"choices":[{"index":0,"delta":{"reasoning_content":"Thinking..."},"finish_reason":""}]}
@@ -309,7 +396,7 @@ data: [DONE]
 
 	reader := io.NopCloser(strings.NewReader(sseData))
 	stream := newAlibabaStream(reader)
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var chunks []*provider.StreamChunk
 	for {
@@ -321,17 +408,21 @@ data: [DONE]
 		chunks = append(chunks, chunk)
 	}
 
-	// Should have: reasoning + 2 text + finish
-	require.Len(t, chunks, 4)
+	// Should have: reasoning-start + reasoning + reasoning-end + 2 text + finish
+	require.Len(t, chunks, 6)
 
-	assert.Equal(t, provider.ChunkTypeReasoning, chunks[0].Type)
-	assert.Equal(t, "Thinking...", chunks[0].Reasoning)
+	assert.Equal(t, provider.ChunkTypeReasoningStart, chunks[0].Type)
 
-	assert.Equal(t, provider.ChunkTypeText, chunks[1].Type)
-	assert.Equal(t, "Answer: ", chunks[1].Text)
+	assert.Equal(t, provider.ChunkTypeReasoning, chunks[1].Type)
+	assert.Equal(t, "Thinking...", chunks[1].Reasoning)
 
-	assert.Equal(t, provider.ChunkTypeText, chunks[2].Type)
-	assert.Equal(t, "42", chunks[2].Text)
+	assert.Equal(t, provider.ChunkTypeReasoningEnd, chunks[2].Type)
 
-	assert.Equal(t, provider.ChunkTypeFinish, chunks[3].Type)
+	assert.Equal(t, provider.ChunkTypeText, chunks[3].Type)
+	assert.Equal(t, "Answer: ", chunks[3].Text)
+
+	assert.Equal(t, provider.ChunkTypeText, chunks[4].Type)
+	assert.Equal(t, "42", chunks[4].Text)
+
+	assert.Equal(t, provider.ChunkTypeFinish, chunks[5].Type)
 }

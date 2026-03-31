@@ -1,0 +1,331 @@
+---
+title: Reasoning
+description: Learn how to control reasoning across providers with the top-level Reasoning parameter.
+---
+
+# Reasoning
+
+Many language models support an internal "reasoning" phase (sometimes also called "thinking") before producing a response. The Go AI SDK provides a top-level `Reasoning` parameter on `GenerateText` and `StreamText` that controls this behavior across providers with a single, portable setting.
+
+## Basic usage
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/digitallysavvy/go-ai/pkg/ai"
+	"github.com/digitallysavvy/go-ai/pkg/provider/types"
+	"github.com/digitallysavvy/go-ai/pkg/providers/anthropic"
+)
+
+func main() {
+	ctx := context.Background()
+	provider := anthropic.NewProvider()
+	model := provider.LanguageModel("claude-sonnet-4-6")
+
+	reasoning := types.ReasoningMedium
+	result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+		Model:     model,
+		Prompt:    "How many people will live in the world in 2040?",
+		Reasoning: &reasoning,
+	})
+	if err != nil {
+		log.Fatalf("Generation failed: %v", err)
+	}
+
+	fmt.Println("Answer:", result.Text)
+
+	// Access reasoning content from the result's Content parts.
+	// Reasoning is returned as types.ReasoningContent blocks within the
+	// step results, not as a top-level field.
+	if len(result.Steps) > 0 {
+		lastStep := result.Steps[len(result.Steps)-1]
+		for _, part := range lastStep.Content {
+			if rc, ok := part.(types.ReasoningContent); ok {
+				fmt.Println("Reasoning:", rc.Text)
+			}
+		}
+	}
+}
+```
+
+The `Reasoning` field is a `*types.ReasoningLevel`. Pass a pointer to one of the level constants to set the desired effort. When `nil` (the default), the provider's own default behavior is used.
+
+## Streaming
+
+The `Reasoning` parameter works the same way with `StreamText`. Use the `OnChunk` callback to receive reasoning and text deltas as they arrive:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/digitallysavvy/go-ai/pkg/ai"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
+	"github.com/digitallysavvy/go-ai/pkg/provider/types"
+	"github.com/digitallysavvy/go-ai/pkg/providers/google"
+)
+
+func main() {
+	ctx := context.Background()
+	p := google.NewProvider()
+	model := p.LanguageModel("gemini-3-flash-preview")
+
+	reasoning := types.ReasoningHigh
+	result, err := ai.StreamText(ctx, ai.StreamTextOptions{
+		Model:     model,
+		Prompt:    "Explain the Riemann hypothesis in simple terms.",
+		Reasoning: &reasoning,
+		OnChunk: func(chunk provider.StreamChunk) {
+			switch chunk.Type {
+			case provider.ChunkTypeReasoning:
+				fmt.Fprint(os.Stderr, chunk.Reasoning)
+			case provider.ChunkTypeText:
+				fmt.Print(chunk.Text)
+			}
+		},
+	})
+	if err != nil {
+		log.Fatalf("Streaming failed: %v", err)
+	}
+
+	// ReadAll blocks until the stream completes.
+	if _, err := result.ReadAll(); err != nil {
+		log.Fatalf("ReadAll failed: %v", err)
+	}
+}
+```
+
+The stream also emits `ChunkTypeReasoningStart` and `ChunkTypeReasoningEnd` to mark reasoning block boundaries. These carry an `ID` field that links them to their corresponding `ChunkTypeReasoning` deltas, but contain no text content themselves.
+
+## Reasoning levels
+
+| Constant | Value | Behavior |
+| --- | --- | --- |
+| `types.ReasoningDefault` | `"provider-default"` | Use the provider's default reasoning behavior (default when `nil`) |
+| `types.ReasoningNone` | `"none"` | Disable reasoning |
+| `types.ReasoningMinimal` | `"minimal"` | Bare-minimum reasoning |
+| `types.ReasoningLow` | `"low"` | Fast, concise reasoning |
+| `types.ReasoningMedium` | `"medium"` | Balanced reasoning |
+| `types.ReasoningHigh` | `"high"` | Thorough reasoning |
+| `types.ReasoningXHigh` | `"xhigh"` | Maximum reasoning |
+
+## Provider support
+
+Each provider translates the level to its native reasoning API. Some providers support all levels natively, while others coerce to fewer levels (a warning is emitted when coercion occurs). Some providers use a numeric token budget instead of an enum; in those cases the level is mapped to a budget calculated as a percentage of the model's maximum output tokens.
+
+### Level mapping
+
+| Level | Anthropic | OpenAI | Bedrock (Claude) | Bedrock (Nova) | Google / Vertex |
+| --- | --- | --- | --- | --- | --- |
+| `none` | `disabled` | `disabled` | `disabled` | `disabled` | `thinkingBudget: 0` |
+| `minimal` | 2% of max | `low` | 2% of max | `low` | 2% of max |
+| `low` | 10% | `low` | 10% | `low` | 10% |
+| `medium` | 30% | `medium` | 30% | `medium` | 30% |
+| `high` | 60% | `high` | 60% | `high` | 60% |
+| `xhigh` | 90% | `high` | 90% | `high` | 90% |
+| `provider-default` | omitted | omitted | omitted | omitted | omitted |
+
+**Anthropic dynamic budgets:** Budget tokens are calculated dynamically per model using the formula `percentage * maxOutputTokens`, with a floor of 1,024 tokens. For example, `claude-sonnet-4-6` has a 128,000 max output token limit, so `medium` (30%) maps to 38,400 tokens. Model-specific limits: 128,000 for claude-4-6, 64,000 for claude-4-5, 32,000 for claude-4-1, 4,096 default.
+
+**Google / Vertex dynamic budgets:** Budget tokens are calculated as 2/10/30/60/90% of the model's max thinking tokens. Gemini 3 models use a `thinkingLevel` string instead of a numeric budget.
+
+### Other supported providers
+
+| Provider | Native mapping | Notes |
+| --- | --- | --- |
+| **DeepSeek** | Provider-specific | Enables reasoning for DeepSeek-R1 and similar models. |
+| **Alibaba** | Provider-specific | Enables reasoning for Qwen models with thinking support. |
+| **Fireworks** | Provider-specific | Forwards reasoning configuration to supported models. |
+| **Groq** | Provider-specific | Supports reasoning on compatible models. |
+| **XAI** | `reasoning_effort` | OpenAI-compatible mapping. Reasoning deltas emitted via `OnReasoningDelta`. |
+| **Open Responses** | `reasoning_effort` | OpenAI-compatible mapping. |
+
+### Providers that warn
+
+| Provider | Behavior |
+| --- | --- |
+| **Perplexity** | Emits an `unsupported-setting` warning and ignores the parameter. |
+| **Cohere** | Emits an `unsupported-setting` warning and ignores the parameter. |
+| **Mistral** | Only `mistral-small-latest` supports reasoning. Other models emit a warning. |
+
+## Precedence rules
+
+The top-level `Reasoning` parameter and provider-specific `ProviderOptions` are **never merged**. If you set reasoning-related options in `ProviderOptions`, they take full precedence and the top-level `Reasoning` parameter is ignored.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/digitallysavvy/go-ai/pkg/ai"
+	"github.com/digitallysavvy/go-ai/pkg/provider/types"
+	"github.com/digitallysavvy/go-ai/pkg/providers/openai"
+)
+
+func main() {
+	ctx := context.Background()
+	p := openai.NewProvider()
+	model := p.ResponsesModel("gpt-5.4")
+
+	reasoning := types.ReasoningLow // ignored because ProviderOptions is set
+	result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+		Model:     model,
+		Prompt:    "Explain quantum entanglement.",
+		Reasoning: &reasoning,
+		ProviderOptions: map[string]interface{}{
+			"openai": map[string]interface{}{
+				"reasoningEffort": "high", // this wins
+			},
+		},
+	})
+	if err != nil {
+		log.Fatalf("Generation failed: %v", err)
+	}
+
+	fmt.Println(result.Text)
+}
+```
+
+This design lets you use the portable `Reasoning` parameter by default and fall back to `ProviderOptions` only when you need provider-specific features like exact token budgets.
+
+## Migrating from ProviderOptions
+
+If you currently control reasoning via `ProviderOptions`, you can migrate to the top-level `Reasoning` parameter for portability across providers.
+
+### Before (Anthropic)
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:  anthropicModel,
+	Prompt: "How many people will live in the world in 2040?",
+	ProviderOptions: map[string]interface{}{
+		"anthropic": map[string]interface{}{
+			"thinking": map[string]interface{}{
+				"type":   "adaptive",
+				"effort": "high",
+			},
+		},
+	},
+})
+```
+
+### After (Anthropic)
+
+```go
+reasoning := types.ReasoningHigh
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:     anthropicModel,
+	Prompt:    "How many people will live in the world in 2040?",
+	Reasoning: &reasoning,
+})
+```
+
+### Before (Anthropic with exact budget)
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:  anthropicModel, // e.g. claude-sonnet-4-20250514
+	Prompt: "How many people will live in the world in 2040?",
+	ProviderOptions: map[string]interface{}{
+		"anthropic": map[string]interface{}{
+			"thinking": map[string]interface{}{
+				"type":         "enabled",
+				"budgetTokens": 12000,
+			},
+		},
+	},
+})
+```
+
+### After (Anthropic with exact budget)
+
+```go
+reasoning := types.ReasoningMedium
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:     anthropicModel, // e.g. claude-sonnet-4-20250514
+	Prompt:    "How many people will live in the world in 2040?",
+	Reasoning: &reasoning,
+})
+```
+
+If you need to enforce an exact token budget (e.g., exactly 12,000 tokens), keep using `ProviderOptions` instead of the top-level `Reasoning` parameter.
+
+### Before (OpenAI with reasoningSummary)
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:  openaiModel, // e.g. o3 via ResponsesModel
+	Prompt: "Explain quantum entanglement.",
+	ProviderOptions: map[string]interface{}{
+		"openai": map[string]interface{}{
+			"reasoningEffort":  "high",
+			"reasoningSummary": "auto",
+		},
+	},
+})
+```
+
+### After (OpenAI with reasoningSummary)
+
+```go
+reasoning := types.ReasoningHigh
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:     openaiModel, // e.g. o3 via ResponsesModel
+	Prompt:    "Explain quantum entanglement.",
+	Reasoning: &reasoning,
+	ProviderOptions: map[string]interface{}{
+		"openai": map[string]interface{}{
+			"reasoningSummary": "auto",
+		},
+	},
+})
+```
+
+### Before (Google with thinkingConfig)
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:  googleModel,
+	Prompt: "Explain the Riemann hypothesis in simple terms.",
+	ProviderOptions: map[string]interface{}{
+		"google": map[string]interface{}{
+			"thinkingConfig": map[string]interface{}{
+				"thinkingBudget":  4096,
+				"includeThoughts": true,
+			},
+		},
+	},
+})
+```
+
+### After (Google with thinkingConfig)
+
+```go
+reasoning := types.ReasoningMedium
+result, err := ai.GenerateText(ctx, ai.GenerateTextOptions{
+	Model:     googleModel,
+	Prompt:    "Explain the Riemann hypothesis in simple terms.",
+	Reasoning: &reasoning,
+	ProviderOptions: map[string]interface{}{
+		"google": map[string]interface{}{
+			"thinkingConfig": map[string]interface{}{
+				"includeThoughts": true,
+			},
+		},
+	},
+})
+```
+
+Note that `ProviderOptions` can still be used alongside `Reasoning` for provider-specific features unrelated to reasoning effort. However, if `ProviderOptions` includes reasoning effort or budget settings (e.g., `reasoningEffort`, `thinking`, `thinkingConfig.thinkingBudget`), those take full precedence and the top-level `Reasoning` parameter is ignored.

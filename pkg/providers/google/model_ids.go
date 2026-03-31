@@ -49,9 +49,10 @@ const (
 	ModelGemini3FlashPreview    = "gemini-3-flash-preview"
 
 	// Gemini 3.1 series — added in #12695 and #12883
-	ModelGemini31ProPreview        = "gemini-3.1-pro-preview"         // language model (#12695)
-	ModelGemini31ProPreviewCustom  = "gemini-3.1-pro-preview-customtools" // (#12819)
-	ModelGemini31FlashImagePreview = "gemini-3.1-flash-image-preview" // image model (#12883)
+	ModelGemini31ProPreview        = "gemini-3.1-pro-preview"              // language model (#12695)
+	ModelGemini31ProPreviewCustom  = "gemini-3.1-pro-preview-customtools"  // (#12819)
+	ModelGemini31FlashLitePreview  = "gemini-3.1-flash-lite-preview"       // (#12883)
+	ModelGemini31FlashImagePreview = "gemini-3.1-flash-image-preview"      // image model (#12883)
 
 	// Latest alias models — added in #12819
 	ModelGeminiProLatest       = "gemini-pro-latest"
@@ -77,9 +78,15 @@ const (
 	ModelGemma327BIt  = "gemma-3-27b-it"
 )
 
+// Embedding model IDs for Google Generative AI
+const (
+	EmbeddingModelGeminiEmbedding001      = "gemini-embedding-001"
+	EmbeddingModelGeminiEmbedding2Preview = "gemini-embedding-2-preview"
+)
+
 // Imagen model IDs for Google Generative AI image generation (use :predict API)
 const (
-	ModelImagen40Generate001     = "imagen-4.0-generate-001"
+	ModelImagen40Generate001      = "imagen-4.0-generate-001"
 	ModelImagen40UltraGenerate001 = "imagen-4.0-ultra-generate-001"
 	ModelImagen40FastGenerate001  = "imagen-4.0-fast-generate-001"
 )

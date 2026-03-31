@@ -80,7 +80,7 @@ func (m *ImageModel) DoGenerate(ctx context.Context, opts *provider.ImageGenerat
 	if err != nil {
 		return nil, providererrors.NewProviderError("aws-bedrock", 0, "", err.Error(), err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -88,7 +88,7 @@ func (m *ImageModel) DoGenerate(ctx context.Context, opts *provider.ImageGenerat
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("AWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("LAWS Bedrock API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return m.convertResponse(respBody)
@@ -109,7 +109,7 @@ func (m *ImageModel) buildRequestBody(opts *provider.ImageGenerateOptions) map[s
 
 	if opts.Size != "" {
 		var width, height int
-		fmt.Sscanf(opts.Size, "%dx%d", &width, &height)
+		_, _ = fmt.Sscanf(opts.Size, "%dx%d", &width, &height)
 		if width > 0 && height > 0 {
 			reqBody["width"] = width
 			reqBody["height"] = height

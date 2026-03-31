@@ -117,7 +117,7 @@ func TestProvider_GetAvailableModels(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"providers": [
 				{
 					"id": "openai",
@@ -170,7 +170,7 @@ func TestProvider_GetCredits(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"available": 1000,
 			"used": 250
 		}`))
@@ -207,7 +207,7 @@ func TestProvider_MetadataCache(t *testing.T) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"providers": []}`))
+		_, _ = w.Write([]byte(`{"providers": []}`))
 	}))
 	defer server.Close()
 
@@ -317,7 +317,7 @@ func TestProjectIDHeader_PresentWhenSet(t *testing.T) {
 		capturedHeader = r.Header.Get("ai-o11y-project-id")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"providers":[]}`))
+		_, _ = w.Write([]byte(`{"providers":[]}`))
 	}))
 	defer server.Close()
 
@@ -347,7 +347,7 @@ func TestProjectIDHeader_PresentWhenSetViaOption(t *testing.T) {
 		capturedHeader = r.Header.Get("ai-o11y-project-id")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"providers":[]}`))
+		_, _ = w.Write([]byte(`{"providers":[]}`))
 	}))
 	defer server.Close()
 
@@ -376,7 +376,7 @@ func TestProjectIDHeader_AbsentWhenNotSet(t *testing.T) {
 		capturedHeader = r.Header.Get("ai-o11y-project-id")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"providers":[]}`))
+		_, _ = w.Write([]byte(`{"providers":[]}`))
 	}))
 	defer server.Close()
 

@@ -49,7 +49,7 @@ func main() {
 }
 
 // larkGrammarExample shows a custom tool that constrains output to a Lark grammar.
-// The model will produce output matching the grammar definition.
+// The tool name is supplied to ToTool("name") — not stored in the CustomTool itself.
 func larkGrammarExample() {
 	syntax := "lark"
 	definition := `
@@ -60,7 +60,7 @@ pair: STRING ":" STRING
 STRING: "\"" /[^"]*/ "\""
 `
 
-	ct := openaitool.NewCustomTool("json-extractor",
+	ct := openaitool.NewCustomTool(
 		openaitool.WithDescription("Extract key-value pairs from text as JSON"),
 		openaitool.WithFormat(openaitool.CustomToolFormat{
 			Type:       "grammar",
@@ -69,7 +69,7 @@ STRING: "\"" /[^"]*/ "\""
 		}),
 	)
 
-	printToolWireFormat("json-extractor (lark grammar)", ct.ToTool())
+	printToolWireFormat("json-extractor (lark grammar)", ct.ToTool("json-extractor"))
 }
 
 // regexGrammarExample shows a custom tool using a regex grammar to constrain output.
@@ -77,7 +77,7 @@ func regexGrammarExample() {
 	syntax := "regex"
 	definition := `^\d{4}-\d{2}-\d{2}$` // ISO date format: YYYY-MM-DD
 
-	ct := openaitool.NewCustomTool("date-extractor",
+	ct := openaitool.NewCustomTool(
 		openaitool.WithDescription("Extract a date from the text in YYYY-MM-DD format"),
 		openaitool.WithFormat(openaitool.CustomToolFormat{
 			Type:       "grammar",
@@ -86,24 +86,24 @@ func regexGrammarExample() {
 		}),
 	)
 
-	printToolWireFormat("date-extractor (regex grammar)", ct.ToTool())
+	printToolWireFormat("date-extractor (regex grammar)", ct.ToTool("date-extractor"))
 }
 
 // textFormatExample shows a custom tool with unconstrained text output.
 func textFormatExample() {
-	ct := openaitool.NewCustomTool("sentiment-analyzer",
+	ct := openaitool.NewCustomTool(
 		openaitool.WithDescription("Analyze the sentiment of the provided text"),
 		openaitool.WithFormat(openaitool.CustomToolFormat{
 			Type: "text",
 		}),
 	)
 
-	printToolWireFormat("sentiment-analyzer (text format)", ct.ToTool())
+	printToolWireFormat("sentiment-analyzer (text format)", ct.ToTool("sentiment-analyzer"))
 }
 
 // mixedToolsExample shows PrepareTools handling both standard functions and custom tools.
 func mixedToolsExample() {
-	ct := openaitool.NewCustomTool("json-extractor",
+	ct := openaitool.NewCustomTool(
 		openaitool.WithDescription("Extract JSON from text"),
 		openaitool.WithFormat(openaitool.CustomToolFormat{Type: "text"}),
 	)
@@ -124,8 +124,8 @@ func mixedToolsExample() {
 				"required": []string{"location"},
 			},
 		},
-		// Custom tool
-		ct.ToTool(),
+		// Custom tool — name supplied via ToTool("name")
+		ct.ToTool("json-extractor"),
 	}
 
 	prepared := responses.PrepareTools(allTools)

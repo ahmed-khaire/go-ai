@@ -94,6 +94,9 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 		"model":  m.modelID,
 		"stream": stream,
 	}
+	if stream {
+		body["stream_options"] = map[string]interface{}{"include_usage": true}
+	}
 	if opts.Prompt.IsMessages() {
 		body["messages"] = prompt.ToOpenAIMessages(opts.Prompt.Messages)
 	} else if opts.Prompt.IsSimple() {
@@ -130,6 +133,18 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 			"type": opts.ResponseFormat.Type,
 		}
 	}
+	// Map top-level Reasoning to DeepSeek thinking object.
+	// DeepSeek uses { thinking: { type: "enabled" | "disabled" } }, not reasoning_effort.
+	// provider-default → omit (let DeepSeek use its own default).
+	if opts.Reasoning != nil {
+		switch *opts.Reasoning {
+		case types.ReasoningNone:
+			body["thinking"] = map[string]interface{}{"type": "disabled"}
+		case types.ReasoningMinimal, types.ReasoningLow, types.ReasoningMedium, types.ReasoningHigh, types.ReasoningXHigh:
+			body["thinking"] = map[string]interface{}{"type": "enabled"}
+		// ReasoningDefault: omit
+		}
+	}
 	return body
 }
 
@@ -146,6 +161,9 @@ func (m *LanguageModel) convertResponse(response deepseekResponse) *types.Genera
 		FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason),
 		Usage:        convertDeepseekUsage(response.Usage),
 		RawResponse:  response,
+	}
+	if choice.Message.ReasoningContent != "" {
+		result.Content = append(result.Content, types.ReasoningContent{Text: choice.Message.ReasoningContent})
 	}
 	if len(choice.Message.ToolCalls) > 0 {
 		result.ToolCalls = make([]types.ToolCall, len(choice.Message.ToolCalls))
@@ -219,9 +237,10 @@ type deepseekResponse struct {
 		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
 		Message      struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"` // thinking mode
+			ToolCalls        []struct {
 				ID       string `json:"id"`
 				Type     string `json:"type"`
 				Function struct {
@@ -260,8 +279,9 @@ type deepseekStreamChunk struct {
 		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
 		Delta        struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"` // thinking mode
 			ToolCalls []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
@@ -275,19 +295,37 @@ type deepseekStreamChunk struct {
 	} `json:"choices"`
 }
 
+// deepseekStreamAccumToolCall holds partial tool call state accumulated across SSE deltas.
+type deepseekStreamAccumToolCall struct {
+	id        string
+	name      string
+	arguments string
+}
+
 type deepseekStream struct {
-	reader io.ReadCloser
-	parser *streaming.SSEParser
-	err    error
+	reader            io.ReadCloser
+	parser            *streaming.SSEParser
+	err               error
+	toolCallAccum     map[int]*deepseekStreamAccumToolCall
+	flushQueue        []*provider.StreamChunk
+	isActiveReasoning bool
 }
 
 func newDeepseekStream(reader io.ReadCloser) *deepseekStream {
-	return &deepseekStream{reader: reader, parser: streaming.NewSSEParser(reader)}
+	return &deepseekStream{
+		reader:        reader,
+		parser:        streaming.NewSSEParser(reader),
+		toolCallAccum: make(map[int]*deepseekStreamAccumToolCall),
+	}
 }
 
-func (s *deepseekStream) Read(p []byte) (n int, err error)  { return s.reader.Read(p) }
-func (s *deepseekStream) Close() error                      { return s.reader.Close() }
+func (s *deepseekStream) Close() error { return s.reader.Close() }
 func (s *deepseekStream) Next() (*provider.StreamChunk, error) {
+	if len(s.flushQueue) > 0 {
+		chunk := s.flushQueue[0]
+		s.flushQueue = s.flushQueue[1:]
+		return chunk, nil
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -306,30 +344,98 @@ func (s *deepseekStream) Next() (*provider.StreamChunk, error) {
 	}
 	if len(chunkData.Choices) > 0 {
 		choice := chunkData.Choices[0]
-		if choice.Delta.Content != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeText, Text: choice.Delta.Content}, nil
-		}
-		if len(choice.Delta.ToolCalls) > 0 {
-			tc := choice.Delta.ToolCalls[0]
-			var args map[string]interface{}
-			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+
+		// Handle reasoning content (emitted before text in DeepSeek thinking mode).
+		if choice.Delta.ReasoningContent != "" {
+			if !s.isActiveReasoning {
+				s.isActiveReasoning = true
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningStart, ID: "reasoning-0"},
+					{Type: provider.ChunkTypeReasoning, Reasoning: choice.Delta.ReasoningContent, ID: "reasoning-0"},
+				}, s.flushQueue...)
+				return s.Next()
 			}
 			return &provider.StreamChunk{
-				Type: provider.ChunkTypeToolCall,
-				ToolCall: &types.ToolCall{
-					ID:        tc.ID,
-					ToolName:  tc.Function.Name,
-					Arguments: args,
-				},
+				Type:      provider.ChunkTypeReasoning,
+				Reasoning: choice.Delta.ReasoningContent,
+				ID:        "reasoning-0",
 			}, nil
 		}
+
+		// End reasoning block when text content arrives.
+		if choice.Delta.Content != "" {
+			if s.isActiveReasoning {
+				s.isActiveReasoning = false
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"},
+					{Type: provider.ChunkTypeText, Text: choice.Delta.Content},
+				}, s.flushQueue...)
+				return s.Next()
+			}
+			return &provider.StreamChunk{Type: provider.ChunkTypeText, Text: choice.Delta.Content}, nil
+		}
+		// Tool call delta — accumulate partial arguments by index.
+		// Finalize only when finish_reason is received, never mid-stream.
+		if len(choice.Delta.ToolCalls) > 0 {
+			for _, tc := range choice.Delta.ToolCalls {
+				accum, ok := s.toolCallAccum[tc.Index]
+				if !ok {
+					accum = &deepseekStreamAccumToolCall{}
+					s.toolCallAccum[tc.Index] = accum
+				}
+				if tc.ID != "" {
+					accum.id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					accum.name = tc.Function.Name
+				}
+				accum.arguments += tc.Function.Arguments
+			}
+			if choice.FinishReason != "" {
+				s.flushDeepseekToolCalls(choice.FinishReason)
+				return s.Next()
+			}
+			return s.Next()
+		}
 		if choice.FinishReason != "" {
-			return &provider.StreamChunk{Type: provider.ChunkTypeFinish, FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason)}, nil
+			s.flushDeepseekToolCalls(choice.FinishReason)
+			return s.Next()
 		}
 	}
 	return s.Next()
 }
+
+func (s *deepseekStream) flushDeepseekToolCalls(finishReason string) {
+	if s.isActiveReasoning {
+		s.isActiveReasoning = false
+		s.flushQueue = append([]*provider.StreamChunk{
+			{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"},
+		}, s.flushQueue...)
+	}
+	for i := 0; i < len(s.toolCallAccum); i++ {
+		accum, ok := s.toolCallAccum[i]
+		if !ok {
+			continue
+		}
+		var args map[string]interface{}
+		if accum.arguments != "" {
+			_ = json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
+		}
+		s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
+			Type: provider.ChunkTypeToolCall,
+			ToolCall: &types.ToolCall{
+				ID:        accum.id,
+				ToolName:  accum.name,
+				Arguments: args,
+			},
+		})
+	}
+	s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
+		Type:         provider.ChunkTypeFinish,
+		FinishReason: providerutils.MapOpenAIFinishReason(finishReason),
+	})
+}
+
 func (s *deepseekStream) Err() error {
 	if s.err == io.EOF {
 		return nil

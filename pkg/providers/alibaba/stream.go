@@ -23,17 +23,18 @@ type alibabaStream struct {
 	finishReason string
 	// Usage captured from final chunk
 	usage *types.Usage
-	// Whether we need to emit a finish chunk
-	needsFinishChunk bool
+	// flushQueue holds fully-assembled chunks to emit before reading more SSE events.
+	// Tool calls are enqueued here only when finish_reason is received (flush).
+	flushQueue        []*provider.StreamChunk
+	isActiveReasoning bool
 }
 
 // toolCallAccumulator tracks the state of a tool call being built across chunks
 type toolCallAccumulator struct {
-	ID       string
-	Type     string
-	Name     string
-	Args     strings.Builder
-	Complete bool
+	ID   string
+	Type string
+	Name string
+	Args strings.Builder
 }
 
 // newAlibabaStream creates a new Alibaba stream
@@ -45,11 +46,6 @@ func newAlibabaStream(reader io.ReadCloser) *alibabaStream {
 	}
 }
 
-// Read implements io.Reader
-func (s *alibabaStream) Read(p []byte) (n int, err error) {
-	return s.reader.Read(p)
-}
-
 // Close implements io.Closer
 func (s *alibabaStream) Close() error {
 	return s.reader.Close()
@@ -57,14 +53,15 @@ func (s *alibabaStream) Close() error {
 
 // Next returns the next chunk in the stream
 func (s *alibabaStream) Next() (*provider.StreamChunk, error) {
-	if s.err != nil {
-		return nil, s.err
+	// Emit any fully-assembled chunks (tool calls + finish) before reading more SSE.
+	if len(s.flushQueue) > 0 {
+		chunk := s.flushQueue[0]
+		s.flushQueue = s.flushQueue[1:]
+		return chunk, nil
 	}
 
-	// Check if we need to emit a finish chunk from previous processing
-	if s.needsFinishChunk {
-		s.needsFinishChunk = false
-		return s.buildFinishChunk(), nil
+	if s.err != nil {
+		return nil, s.err
 	}
 
 	// Get next SSE event
@@ -117,21 +114,45 @@ func (s *alibabaStream) processChunk(chunk *alibabaStreamChunk) (*provider.Strea
 
 	// Handle reasoning content (Alibaba thinking mode)
 	if delta.ReasoningContent != "" {
-		// If this chunk also has a finish reason, we need to emit finish chunk next
-		if choice.FinishReason != "" {
-			s.needsFinishChunk = true
+		var extra []*provider.StreamChunk
+		if !s.isActiveReasoning {
+			s.isActiveReasoning = true
+			extra = []*provider.StreamChunk{
+				{Type: provider.ChunkTypeReasoningStart, ID: "reasoning-0"},
+			}
 		}
-		return &provider.StreamChunk{
+		reasoningChunk := &provider.StreamChunk{
 			Type:      provider.ChunkTypeReasoning,
 			Reasoning: delta.ReasoningContent,
-		}, nil
+			ID:        "reasoning-0",
+		}
+		if choice.FinishReason != "" {
+			s.isActiveReasoning = false
+			s.flushQueue = append(extra, reasoningChunk, &provider.StreamChunk{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"}, s.buildFinishChunk())
+			return s.Next()
+		}
+		if len(extra) > 0 {
+			s.flushQueue = append(extra, reasoningChunk)
+			return s.Next()
+		}
+		return reasoningChunk, nil
 	}
 
-	// Handle text content
+	// Handle text content - end reasoning if active
 	if delta.Content != "" {
-		// If this chunk also has a finish reason, we need to emit finish chunk next
+		if s.isActiveReasoning {
+			s.isActiveReasoning = false
+			endChunk := &provider.StreamChunk{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"}
+			textChunk := &provider.StreamChunk{Type: provider.ChunkTypeText, Text: delta.Content}
+			if choice.FinishReason != "" {
+				s.flushQueue = append([]*provider.StreamChunk{endChunk, textChunk}, s.buildFinishChunk())
+			} else {
+				s.flushQueue = []*provider.StreamChunk{endChunk, textChunk}
+			}
+			return s.Next()
+		}
 		if choice.FinishReason != "" {
-			s.needsFinishChunk = true
+			s.flushQueue = append(s.flushQueue, s.buildFinishChunk())
 		}
 		return &provider.StreamChunk{
 			Type: provider.ChunkTypeText,
@@ -139,45 +160,34 @@ func (s *alibabaStream) processChunk(chunk *alibabaStreamChunk) (*provider.Strea
 		}, nil
 	}
 
-	// Handle tool call deltas
+	// Handle tool call deltas — only accumulate, never emit mid-stream.
+	// Tool calls are finalized and emitted only when finish_reason is received.
 	if len(delta.ToolCalls) > 0 {
 		for _, tc := range delta.ToolCalls {
-			if toolCall := s.accumulateToolCall(tc); toolCall != nil {
-				// Tool call just became complete, emit it
-				// If this chunk also has a finish reason, we need to emit finish chunk later
-				if choice.FinishReason != "" {
-					s.needsFinishChunk = true
-				}
-				return &provider.StreamChunk{
-					Type:     provider.ChunkTypeToolCall,
-					ToolCall: toolCall,
-				}, nil
-			}
+			s.accumulateToolCall(tc)
 		}
-		// No complete tool calls yet
-		// If this chunk has a finish reason, emit finish chunk
 		if choice.FinishReason != "" {
-			return s.buildFinishChunk(), nil
+			s.flushToolCalls()
+			return s.Next()
 		}
-		// Continue to next chunk
 		return s.Next()
 	}
 
-	// If we have a finish reason but no content, return finish chunk
+	// If we have a finish reason but no content, flush tool calls then finish.
 	if choice.FinishReason != "" {
-		return s.buildFinishChunk(), nil
+		s.flushToolCalls()
+		return s.Next()
 	}
 
 	// Empty chunk, get next
 	return s.Next()
 }
 
-// accumulateToolCall accumulates tool call data from delta chunks
-// Returns a completed ToolCall if the tool call just became complete, nil otherwise
-func (s *alibabaStream) accumulateToolCall(tc alibabaToolCallDelta) *types.ToolCall {
+// accumulateToolCall accumulates tool call data from a delta chunk.
+// Tool calls are never emitted mid-stream; call flushToolCalls() at finish_reason.
+func (s *alibabaStream) accumulateToolCall(tc alibabaToolCallDelta) {
 	index := tc.Index
 
-	// Get or create accumulator
 	acc, exists := s.toolCalls[index]
 	if !exists {
 		acc = &toolCallAccumulator{
@@ -187,39 +197,48 @@ func (s *alibabaStream) accumulateToolCall(tc alibabaToolCallDelta) *types.ToolC
 		s.toolCalls[index] = acc
 	}
 
-	// Update ID and type if provided in this chunk
 	if tc.ID != "" {
 		acc.ID = tc.ID
 	}
 	if tc.Type != "" {
 		acc.Type = tc.Type
 	}
-
-	// Accumulate function name and arguments
 	if tc.Function.Name != "" {
 		acc.Name = tc.Function.Name
 	}
 	if tc.Function.Arguments != "" {
 		acc.Args.WriteString(tc.Function.Arguments)
 	}
+}
 
-	// Check if just became complete
-	if !acc.Complete && acc.ID != "" && acc.Name != "" && acc.Args.Len() > 0 {
-		args := acc.Args.String()
-		// Check if arguments are valid JSON
+// flushToolCalls enqueues all accumulated tool calls onto flushQueue followed by
+// a finish chunk. Must be called only when finish_reason is received.
+func (s *alibabaStream) flushToolCalls() {
+	if s.isActiveReasoning {
+		s.isActiveReasoning = false
+		s.flushQueue = append([]*provider.StreamChunk{
+			{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"},
+		}, s.flushQueue...)
+	}
+	for i := 0; i < len(s.toolCalls); i++ {
+		acc, ok := s.toolCalls[i]
+		if !ok {
+			continue
+		}
 		var argsMap map[string]interface{}
-		if err := json.Unmarshal([]byte(args), &argsMap); err == nil {
-			acc.Complete = true
-			// Return the completed tool call
-			return &types.ToolCall{
+		if acc.Args.Len() > 0 {
+			_ = json.Unmarshal([]byte(acc.Args.String()), &argsMap) //nolint:errcheck
+		}
+		s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
+			Type: provider.ChunkTypeToolCall,
+			ToolCall: &types.ToolCall{
 				ID:        acc.ID,
 				ToolName:  acc.Name,
 				Arguments: argsMap,
-			}
-		}
+			},
+		})
 	}
-
-	return nil
+	s.flushQueue = append(s.flushQueue, s.buildFinishChunk())
 }
 
 // buildFinishChunk creates a finish chunk with accumulated data

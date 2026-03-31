@@ -40,9 +40,9 @@ func main() {
 		log.Fatalf("Failed to create temp file: %v", err)
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.WriteString("Hello, World!\nThis is a test file.\n")
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
+	_, _ = tmpFile.WriteString("Hello, World!\nThis is a test file.\n")
+	_ = tmpFile.Close()
+	defer os.Remove(tmpPath) //nolint:errcheck
 
 	fmt.Printf("Working with temp file: %s\n\n", tmpPath)
 

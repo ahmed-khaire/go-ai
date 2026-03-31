@@ -10,6 +10,9 @@ type RerankResult struct {
 	// Response metadata
 	Response RerankResponse
 
+	// Warnings are any non-fatal warnings emitted by the provider.
+	Warnings []Warning
+
 	// Provider-specific metadata
 	ProviderMetadata interface{}
 }

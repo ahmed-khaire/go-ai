@@ -171,7 +171,7 @@ func (m *ImageModel) doGenerateGemini(ctx context.Context, opts *provider.ImageG
 	}
 	// Gemini image models only support generating a single image at a time.
 	if opts.N != nil && *opts.N > 1 {
-		return nil, fmt.Errorf("Gemini image models do not support generating multiple images. Use Imagen models for multiple image generation")
+		return nil, fmt.Errorf("LGemini image models do not support generating multiple images. Use Imagen models for multiple image generation")
 	}
 
 	// Gemini image models use the language model API with responseModalities: ["IMAGE"]

@@ -10,8 +10,6 @@ import (
 	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 	"github.com/digitallysavvy/go-ai/pkg/telemetry"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // StreamTextOptions contains options for streaming text generation
@@ -57,6 +55,11 @@ type StreamTextOptions struct {
 	// Useful for reducing memory consumption with images or large contexts.
 	// Default (nil) retains everything for backwards compatibility.
 	ExperimentalRetention *types.RetentionSettings
+
+	// Reasoning controls how much thinking effort the model applies.
+	// nil means unset (use provider default). Set to types.ReasoningDefault to
+	// explicitly omit from the API request.
+	Reasoning *types.ReasoningLevel
 
 	// ProviderOptions allows passing provider-specific options
 	ProviderOptions map[string]interface{}
@@ -162,14 +165,34 @@ type StreamTextResult struct {
 	// Timeout configuration for per-chunk timeouts
 	timeout *TimeoutConfig
 
-	// Telemetry span (closed when stream completes)
-	telemetrySpan trace.Span
-	telemetryOpts *TelemetrySettings
+	// telemetryCtx is the context returned by FireOnStart, with any integration
+	// spans embedded.  processStream and ReadAll call FireOnFinish / FireOnError
+	// using this context so OTel spans are correctly closed.
+	telemetryCtx      context.Context
+	telemetrySettings *TelemetrySettings
+
+	// Accumulated tool calls from ChunkTypeToolCall chunks (Fix 1).
+	// Populated during streaming; executed after stream ends.
+	// Protected by mu.
+	toolCalls   []types.ToolCall
+	toolResults []types.ToolResult
+
+	// providerMetadata accumulates provider-specific metadata from stream chunks.
+	// Protected by mu.
+	providerMetadata json.RawMessage
+
+	// warnings accumulated from stream-start chunks
+	warnings []types.Warning
+
+	// sources accumulated from ChunkTypeSource chunks
+	sources []types.SourceContent
 
 	// Structured event callbacks (v6.1 - P0-3)
 	// Stored here so processStream can fire them when the stream completes.
 	cbOnStepFinishEvent func(ctx context.Context, e OnStepFinishEvent)
 	cbOnFinishEvent     func(ctx context.Context, e OnFinishEvent)
+	cbOnToolCallStart   func(ctx context.Context, e OnToolCallStartEvent)
+	cbOnToolCallFinish  func(ctx context.Context, e OnToolCallFinishEvent)
 	cbFuncID            string
 	cbMeta              map[string]any
 	cbModelProvider     string
@@ -179,6 +202,11 @@ type StreamTextResult struct {
 	cbMessages []types.Message
 	cbTools    []types.Tool
 	cbSystem   string
+
+	// cbModel and cbStreamOpts are retained so that processStream can start
+	// additional streaming steps when deferred provider tool results are pending.
+	cbModel      provider.LanguageModel
+	cbStreamOpts StreamTextOptions
 }
 
 // StreamText performs streaming text generation
@@ -188,45 +216,24 @@ func StreamText(ctx context.Context, opts StreamTextOptions) (*StreamTextResult,
 		return nil, fmt.Errorf("model is required")
 	}
 
-	// Create telemetry span if enabled
-	var span trace.Span
-	if opts.ExperimentalTelemetry != nil && opts.ExperimentalTelemetry.IsEnabled {
-		tracer := telemetry.GetTracer(opts.ExperimentalTelemetry)
-
-		// Create top-level ai.streamText span
-		spanName := "ai.streamText"
-		if opts.ExperimentalTelemetry.FunctionID != "" {
-			spanName = spanName + "." + opts.ExperimentalTelemetry.FunctionID
-		}
-
-		ctx, span = tracer.Start(ctx, spanName)
-		// Note: span.End() is deferred in processStream when stream completes
-
-		// Add base telemetry attributes
-		span.SetAttributes(
-			attribute.String("ai.operationId", "ai.streamText"),
-			attribute.String("ai.model.provider", opts.Model.Provider()),
-			attribute.String("ai.model.id", opts.Model.ModelID()),
-		)
-
-		// Add function ID if present
-		if opts.ExperimentalTelemetry.FunctionID != "" {
-			span.SetAttributes(attribute.String("ai.telemetry.functionId", opts.ExperimentalTelemetry.FunctionID))
-		}
-
-		// Add custom metadata
-		for key, value := range opts.ExperimentalTelemetry.Metadata {
-			span.SetAttributes(attribute.KeyValue{
-				Key:   attribute.Key("ai.telemetry.metadata." + key),
-				Value: value,
-			})
-		}
-
-		// Record prompt if enabled
-		if opts.ExperimentalTelemetry.RecordInputs && opts.Prompt != "" {
-			span.SetAttributes(attribute.String("ai.prompt", opts.Prompt))
-		}
+	// Fire OnStart — integrations start their root spans here and embed them
+	// in the returned context.  FireOnFinish / FireOnError are called later
+	// from processStream or ReadAll once the stream completes.
+	telPrompt := ""
+	telSystem := ""
+	if opts.ExperimentalTelemetry != nil && opts.ExperimentalTelemetry.RecordInputs {
+		telPrompt = opts.Prompt
+		telSystem = opts.System
 	}
+	ctx = telemetry.FireOnStart(ctx, telemetry.TelemetryStartEvent{
+		OperationType: "ai.streamText",
+		ModelProvider: opts.Model.Provider(),
+		ModelID:       opts.Model.ModelID(),
+		Settings:      opts.ExperimentalTelemetry,
+		Prompt:        telPrompt,
+		System:        telSystem,
+	})
+	telemetryCtx := ctx // snapshot ctx with embedded spans before timeout wrapping
 
 	// Apply total timeout if configured
 	if opts.Timeout != nil && opts.Timeout.HasTotal() {
@@ -284,9 +291,7 @@ func StreamText(ctx context.Context, opts StreamTextOptions) (*StreamTextResult,
 		if responseFormat == nil {
 			rf, rfErr := op.ResponseFormat(ctx)
 			if rfErr != nil {
-				if span != nil {
-					span.End()
-				}
+				telemetry.FireOnError(telemetryCtx, telemetry.TelemetryErrorEvent{Error: rfErr})
 				return nil, fmt.Errorf("output.ResponseFormat failed: %w", rfErr)
 			}
 			responseFormat = rf
@@ -307,6 +312,7 @@ func StreamText(ctx context.Context, opts StreamTextOptions) (*StreamTextResult,
 		Tools:            opts.Tools,
 		ToolChoice:       opts.ToolChoice,
 		ResponseFormat:   responseFormat,
+		Reasoning:        opts.Reasoning,
 		ProviderOptions:  opts.ProviderOptions,
 		Telemetry:        opts.ExperimentalTelemetry,
 	}
@@ -314,23 +320,23 @@ func StreamText(ctx context.Context, opts StreamTextOptions) (*StreamTextResult,
 	// Start streaming
 	stream, err := opts.Model.DoStream(ctx, genOpts)
 	if err != nil {
-		if span != nil {
-			span.End()
-		}
+		telemetry.FireOnError(telemetryCtx, telemetry.TelemetryErrorEvent{Error: err})
 		return nil, fmt.Errorf("failed to start stream: %w", err)
 	}
 
 	// Create result
 	result := &StreamTextResult{
-		stream:        stream,
-		status:        StreamStatusSubmitted, // actively streaming; set before any chunks arrive
-		timeout:       opts.Timeout,
-		telemetrySpan: span,
-		telemetryOpts: opts.ExperimentalTelemetry,
-		outputSpec:    outputSpec,
+		stream:            stream,
+		status:            StreamStatusSubmitted, // actively streaming; set before any chunks arrive
+		timeout:           opts.Timeout,
+		telemetryCtx:      telemetryCtx,
+		telemetrySettings: opts.ExperimentalTelemetry,
+		outputSpec:        outputSpec,
 		// Structured event callbacks
 		cbOnStepFinishEvent: opts.OnStepFinishEvent,
 		cbOnFinishEvent:     opts.OnFinishEvent,
+		cbOnToolCallStart:   opts.OnToolCallStart,
+		cbOnToolCallFinish:  opts.OnToolCallFinish,
 		cbFuncID:            cbFuncID,
 		cbMeta:              cbMeta,
 		cbModelProvider:     opts.Model.Provider(),
@@ -339,6 +345,9 @@ func StreamText(ctx context.Context, opts StreamTextOptions) (*StreamTextResult,
 		cbMessages:          prompt.Messages,
 		cbTools:             opts.Tools,
 		cbSystem:            opts.System,
+		// Retained for deferred provider tool continuation (P0-4)
+		cbModel:      opts.Model,
+		cbStreamOpts: opts,
 	}
 
 	// Start goroutine to process chunks and call callbacks
@@ -350,66 +359,280 @@ func StreamText(ctx context.Context, opts StreamTextOptions) (*StreamTextResult,
 	return result, nil
 }
 
-// processStream processes the stream and calls callbacks
+// processStream processes the stream and calls callbacks.
+// Implements the three P0-3 architectural changes:
+//
+//  1. Chunks are forwarded to the consumer (onChunk) before any tool Execute fires.
+//  2. Tool calls are accumulated during streaming; Execute is called only after the
+//     stream is fully consumed (after the loop, not mid-stream).
+//  3. Telemetry is recorded through the telemetry.Span interface (no direct OTel imports).
+//
+// P0-4: Supports multi-step continuation for provider tools with SupportsDeferredResults.
+// When such tools are pending, processStream starts a new DoStream call and loops.
 func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provider.StreamChunk), onFinish func(*StreamTextResult)) {
-	firstChunk := true
-	for {
-		chunk, err := r.nextChunk(ctx)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			r.err = err
-			break
-		}
+	opts := r.cbStreamOpts
+	currentMessages := r.cbMessages
 
-		// Transition from Submitted → Streaming on first received chunk.
-		if firstChunk {
-			firstChunk = false
-			r.mu.Lock()
-			r.status = StreamStatusStreaming
-			r.mu.Unlock()
-		}
+	// Build tool name → pointer map for deferred provider tool tracking (P0-4).
+	toolsByName := make(map[string]*types.Tool, len(opts.Tools))
+	for i := range opts.Tools {
+		toolsByName[opts.Tools[i].Name] = &opts.Tools[i]
+	}
+	// pendingDeferredToolCalls tracks provider tools (SupportsDeferredResults=true) whose
+	// results haven't arrived yet. Key = toolCallID, value = toolName.
+	pendingDeferredToolCalls := make(map[string]string)
 
-		// Accumulate text
-		if chunk.Type == provider.ChunkTypeText {
-			r.text += chunk.Text
+	var allSteps []types.StepResult
+	firstChunkEver := true
 
-			// Update partial output after each text chunk (with deduplication).
-			// Only publishes when the JSON representation of the partial changes,
-			// matching the TypeScript SDK's deduplication behavior.
-			if r.outputSpec != nil {
-				partial := r.outputSpec.parsePartialOutput(ctx, ParsePartialOutputOptions{
-					Text: r.text,
-				})
-				if partial != nil {
-					if newJSON, err := json.Marshal(partial); err == nil {
-						if newJSONStr := string(newJSON); newJSONStr != r.lastPartialJSON {
-							r.lastPartialJSON = newJSONStr
-							r.mu.Lock()
-							r.partialOutput = partial
-							r.mu.Unlock()
+	for stepNum := 1; ; stepNum++ {
+		// pendingToolCalls accumulates tool call chunks received during this step's stream.
+		// All Execute() calls happen after the stream loop ends (Fix 1).
+		var stepToolCalls []types.ToolCall
+		// streamedToolResultIDs tracks tool call IDs for which the provider returned a
+		// result inline in this step's stream (used for the deferred hasResult check).
+		streamedToolResultIDs := make(map[string]bool)
+
+		for {
+			chunk, err := r.nextChunk(ctx)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				r.err = err
+				break
+			}
+
+			// Transition from Submitted → Streaming on first received chunk ever.
+			if firstChunkEver {
+				firstChunkEver = false
+				r.mu.Lock()
+				r.status = StreamStatusStreaming
+				r.mu.Unlock()
+			}
+
+			// Accumulate warnings from stream-start chunks
+			if chunk.Type == provider.ChunkTypeStreamStart {
+				r.warnings = append(r.warnings, chunk.Warnings...)
+			}
+
+			// Accumulate text
+			if chunk.Type == provider.ChunkTypeText {
+				r.text += chunk.Text
+
+				// Update partial output after each text chunk (with deduplication).
+				// Only publishes when the JSON representation of the partial changes,
+				// matching the TypeScript SDK's deduplication behavior.
+				if r.outputSpec != nil {
+					partial := r.outputSpec.parsePartialOutput(ctx, ParsePartialOutputOptions{
+						Text: r.text,
+					})
+					if partial != nil {
+						if newJSON, err := json.Marshal(partial); err == nil {
+							if newJSONStr := string(newJSON); newJSONStr != r.lastPartialJSON {
+								r.lastPartialJSON = newJSONStr
+								r.mu.Lock()
+								r.partialOutput = partial
+								r.mu.Unlock()
+							}
 						}
 					}
 				}
 			}
+
+			// Accumulate tool call chunks — do NOT execute yet (Fix 1).
+			// The chunk is still forwarded to the consumer below (Fix 2).
+			if chunk.Type == provider.ChunkTypeToolCall && chunk.ToolCall != nil {
+				stepToolCalls = append(stepToolCalls, *chunk.ToolCall)
+			}
+
+			// Track provider-inline tool results for the deferred hasResult check (P0-4).
+			if chunk.Type == provider.ChunkTypeToolResult && chunk.ToolResult != nil {
+				streamedToolResultIDs[chunk.ToolResult.ToolCallID] = true
+			}
+
+			// Update finish reason, usage, and context management
+			if chunk.Type == provider.ChunkTypeFinish {
+				r.finishReason = chunk.FinishReason
+				if chunk.ContextManagement != nil {
+					r.contextManagement = chunk.ContextManagement
+				}
+			}
+			if chunk.Usage != nil {
+				r.usage = *chunk.Usage
+			}
+
+			// Accumulate provider metadata from each chunk that carries it.
+			if len(chunk.ProviderMetadata) > 0 {
+				r.mu.Lock()
+				r.providerMetadata = chunk.ProviderMetadata
+				r.mu.Unlock()
+			}
+
+			// Accumulate sources from ChunkTypeSource chunks.
+			if chunk.Type == provider.ChunkTypeSource && chunk.SourceContent != nil {
+				r.sources = append(r.sources, *chunk.SourceContent)
+			}
+
+			// Forward chunk to consumer BEFORE any tool Execute fires (Fix 2).
+			if onChunk != nil {
+				onChunk(*chunk)
+			}
+			// Notify telemetry integrations of each chunk.
+			telemetry.FireOnChunk(ctx, telemetry.TelemetryChunkEvent{
+				ChunkType: string(chunk.Type),
+				Text:      chunk.Text,
+			})
+		}
+		if r.err != nil {
+			break
 		}
 
-		// Update finish reason, usage, and context management
-		if chunk.Type == provider.ChunkTypeFinish {
-			r.finishReason = chunk.FinishReason
-			if chunk.ContextManagement != nil {
-				r.contextManagement = chunk.ContextManagement
+		// Execute accumulated tool calls AFTER stream is fully consumed (Fix 1).
+		// All chunks (including tool call chunks) have already been forwarded above.
+		var stepToolResults []types.ToolResult
+		if len(stepToolCalls) > 0 && len(opts.Tools) > 0 {
+			toolCallbacks := toolCallEventCallbacks{
+				onStart:             r.cbOnToolCallStart,
+				onFinish:            r.cbOnToolCallFinish,
+				stepNum:             stepNum,
+				modelProvider:       r.cbModelProvider,
+				modelID:             r.cbModelID,
+				messages:            currentMessages,
+				experimentalContext: r.cbExperimentalCtx,
+				functionID:          r.cbFuncID,
+				metadata:            r.cbMeta,
+				timeout:             r.timeout,
+			}
+			stepToolResults, _ = executeTools(ctx, stepToolCalls, opts.Tools, r.cbExperimentalCtx, &r.usage, toolCallbacks)
+		}
+
+		// Gap 3: Forward tool-result chunks to onChunk consumers, matching the
+		// TypeScript SDK's behaviour where tool-result objects flow back through
+		// the stream pipeline after execution.
+		for i := range stepToolResults {
+			resultChunk := provider.StreamChunk{
+				Type:       provider.ChunkTypeToolResult,
+				ToolResult: &stepToolResults[i],
+			}
+			if onChunk != nil {
+				onChunk(resultChunk)
+			}
+			telemetry.FireOnChunk(ctx, telemetry.TelemetryChunkEvent{
+				ChunkType: string(provider.ChunkTypeToolResult),
+			})
+		}
+
+		// Deferred provider tool tracking (P0-4, mirrors TS SDK pendingDeferredToolCalls).
+		// Add tool calls whose results haven't arrived yet.
+		// Note: check tool.ProviderExecuted on the definition because some providers
+		// (e.g. Anthropic) do not set ProviderExecuted on the ToolCall itself.
+		for _, call := range stepToolCalls {
+			tool := toolsByName[call.ToolName]
+			if tool == nil || !tool.ProviderExecuted || !tool.SupportsDeferredResults {
+				continue
+			}
+			if !streamedToolResultIDs[call.ID] {
+				pendingDeferredToolCalls[call.ID] = call.ToolName
 			}
 		}
-		if chunk.Usage != nil {
-			r.usage = *chunk.Usage
+		// Remove entries resolved by inline provider results (ChunkTypeToolResult chunks)
+		// delivered in this step's stream. This is the primary resolution path for
+		// deferred tools: the provider streams the result in a subsequent response.
+		// Note: stepToolResults includes placeholder entries for provider-executed tools
+		// (ProviderExecuted=true, Result=nil) — those must NOT clear the pending map.
+		// Only real locally-executed results (ProviderExecuted=false) are safe to clear,
+		// and those tools are never added to pendingDeferredToolCalls anyway, so this is
+		// a no-op for them. Only streamedToolResultIDs represents actual inline results.
+		for callID := range streamedToolResultIDs {
+			delete(pendingDeferredToolCalls, callID)
 		}
 
-		// Call chunk callback
-		if onChunk != nil {
-			onChunk(*chunk)
+		// Accumulate step tool calls and results into the overall result.
+		r.mu.Lock()
+		r.toolCalls = append(r.toolCalls, stepToolCalls...)
+		r.toolResults = append(r.toolResults, stepToolResults...)
+		r.mu.Unlock()
+		// Record this step. For multi-step streaming, r.text accumulates across steps;
+		// use the current snapshot as the step's text.
+		stepResult := types.StepResult{
+			StepNumber:   stepNum,
+			Text:         r.text,
+			ToolCalls:    stepToolCalls,
+			ToolResults:  stepToolResults,
+			FinishReason: r.finishReason,
+			Usage:        r.usage,
+			Sources:      r.sources,
 		}
+		allSteps = append(allSteps, stepResult)
+
+		// Check continuation: for streaming, only continue when a deferred provider tool
+		// (SupportsDeferredResults=true) has not yet delivered its result (P0-4).
+		// Local tool calls are handled in-step by executeTools — no additional model
+		// call is needed for them here (unlike generate.go's step loop).
+		if len(pendingDeferredToolCalls) == 0 {
+			break
+		}
+
+		// Build conversation history for the next step.
+		assistantMsg := types.Message{
+			Role:      types.RoleAssistant,
+			Content:   []types.ContentPart{},
+			ToolCalls: stepToolCalls,
+		}
+		if r.text != "" {
+			assistantMsg.Content = append(assistantMsg.Content, types.TextContent{Text: r.text})
+		}
+		currentMessages = append(currentMessages, assistantMsg)
+		for _, tr := range stepToolResults {
+			toolMsg := types.Message{
+				Role: types.RoleTool,
+				Content: []types.ContentPart{
+					types.ToolResultContent{
+						ToolCallID: tr.ToolCallID,
+						ToolName:   tr.ToolName,
+						Result:     tr.Result,
+					},
+				},
+			}
+			currentMessages = append(currentMessages, toolMsg)
+		}
+
+		// Resolve ResponseFormat for the next step.
+		responseFormat := opts.ResponseFormat
+		if responseFormat == nil && r.outputSpec != nil {
+			if rf, rfErr := r.outputSpec.ResponseFormat(ctx); rfErr == nil {
+				responseFormat = rf
+			}
+		}
+
+		// Start a new stream for the next step.
+		nextGenOpts := &provider.GenerateOptions{
+			Prompt: types.Prompt{
+				Messages: currentMessages,
+				System:   opts.System,
+			},
+			Temperature:      opts.Temperature,
+			MaxTokens:        opts.MaxTokens,
+			TopP:             opts.TopP,
+			TopK:             opts.TopK,
+			FrequencyPenalty: opts.FrequencyPenalty,
+			PresencePenalty:  opts.PresencePenalty,
+			StopSequences:    opts.StopSequences,
+			Seed:             opts.Seed,
+			Tools:            opts.Tools,
+			ToolChoice:       opts.ToolChoice,
+			ResponseFormat:   responseFormat,
+			Reasoning:        opts.Reasoning,
+			ProviderOptions:  opts.ProviderOptions,
+			Telemetry:        opts.ExperimentalTelemetry,
+		}
+		newStream, err := r.cbModel.DoStream(ctx, nextGenOpts)
+		if err != nil {
+			r.err = fmt.Errorf("failed to start stream for step %d: %w", stepNum+1, err)
+			break
+		}
+		r.stream = newStream
 	}
 
 	// Resolve final typed output if spec was provided and stream completed cleanly.
@@ -427,30 +650,27 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 		r.mu.Unlock()
 	}
 
-	// Record telemetry output attributes if span exists
-	if r.telemetrySpan != nil {
-		// Record output if enabled
-		if r.telemetryOpts != nil && r.telemetryOpts.RecordOutputs {
-			r.telemetrySpan.SetAttributes(attribute.String("ai.response.text", r.text))
-		}
-
-		// Record finish reason
-		r.telemetrySpan.SetAttributes(attribute.String("ai.response.finishReason", string(r.finishReason)))
-
-		// Record usage information
-		if r.usage.InputTokens != nil {
-			r.telemetrySpan.SetAttributes(attribute.Int64("ai.usage.promptTokens", *r.usage.InputTokens))
-		}
-		if r.usage.OutputTokens != nil {
-			r.telemetrySpan.SetAttributes(attribute.Int64("ai.usage.completionTokens", *r.usage.OutputTokens))
-		}
-		if r.usage.TotalTokens != nil {
-			r.telemetrySpan.SetAttributes(attribute.Int64("ai.usage.totalTokens", *r.usage.TotalTokens))
-		}
-
-		// End the telemetry span
-		r.telemetrySpan.End()
+	// Fire OnFinish — integrations record output attributes and end their spans.
+	streamTelUsage := telemetry.TelemetryUsage{
+		InputTokens:  r.usage.InputTokens,
+		OutputTokens: r.usage.OutputTokens,
+		TotalTokens:  r.usage.TotalTokens,
 	}
+	if r.usage.InputDetails != nil {
+		streamTelUsage.NoCacheInputTokens = r.usage.InputDetails.NoCacheTokens
+		streamTelUsage.CacheReadInputTokens = r.usage.InputDetails.CacheReadTokens
+		streamTelUsage.CacheCreationInputTokens = r.usage.InputDetails.CacheWriteTokens
+	}
+	if r.usage.OutputDetails != nil {
+		streamTelUsage.OutputTextTokens = r.usage.OutputDetails.TextTokens
+		streamTelUsage.ReasoningTokens = r.usage.OutputDetails.ReasoningTokens
+	}
+	telemetry.FireOnFinish(r.telemetryCtx, telemetry.TelemetryFinishEvent{
+		FinishReason: string(r.finishReason),
+		Usage:        streamTelUsage,
+		Text:         r.text,
+		Settings:     r.telemetrySettings,
+	})
 
 	// Mark stream as done before firing callbacks so callers that check
 	// Status() inside callbacks observe the terminal state.
@@ -463,38 +683,52 @@ func (r *StreamTextResult) processStream(ctx context.Context, onChunk func(provi
 		onFinish(r)
 	}
 
-	// CB-T20 (step finish) and CB-T21 (generation finish): emit structured events
+	// CB-T20 (step finish) and CB-T21 (generation finish): emit structured events.
 	// These fire after all chunks are processed and the legacy callbacks have run.
-	stepResult := types.StepResult{
+	// For multi-step streaming, allSteps contains one entry per step.
+	r.mu.Lock()
+	finalToolCalls := r.toolCalls
+	finalToolResults := r.toolResults
+	r.mu.Unlock()
+
+	// Emit per-step finish events and use the last step for the single-step path.
+	lastStep := types.StepResult{
 		StepNumber:   1,
 		Text:         r.text,
-		ToolCalls:    nil,
-		ToolResults:  nil,
+		ToolCalls:    finalToolCalls,
+		ToolResults:  finalToolResults,
 		FinishReason: r.finishReason,
 		Usage:        r.usage,
 	}
+	if len(allSteps) > 0 {
+		lastStep = allSteps[len(allSteps)-1]
+	}
 	Notify(ctx, OnStepFinishEvent{
-		StepNumber:          stepResult.StepNumber,
+		StepNumber:          lastStep.StepNumber,
 		ModelProvider:       r.cbModelProvider,
 		ModelID:             r.cbModelID,
-		Text:                stepResult.Text,
-		ToolCalls:           stepResult.ToolCalls,
-		ToolResults:         stepResult.ToolResults,
-		FinishReason:        stepResult.FinishReason,
-		Usage:               stepResult.Usage,
+		Text:                lastStep.Text,
+		ToolCalls:           lastStep.ToolCalls,
+		ToolResults:         lastStep.ToolResults,
+		FinishReason:        lastStep.FinishReason,
+		Usage:               lastStep.Usage,
 		ExperimentalContext: r.cbExperimentalCtx,
 		FunctionID:          r.cbFuncID,
 		Metadata:            r.cbMeta,
 	}, r.cbOnStepFinishEvent)
 
+	stepsForEvent := allSteps
+	if len(stepsForEvent) == 0 {
+		stepsForEvent = []types.StepResult{lastStep}
+	}
 	Notify(ctx, OnFinishEvent{
 		Text:                r.text,
-		ToolCalls:           nil,
-		ToolResults:         nil,
+		ToolCalls:           finalToolCalls,
+		ToolResults:         finalToolResults,
 		FinishReason:        r.finishReason,
-		Steps:               []types.StepResult{stepResult},
+		Steps:               stepsForEvent,
 		TotalUsage:          r.usage,
-		Warnings:            nil, // streaming is single-step; warnings surfaced via OnStepFinishEvent
+		Warnings:            r.warnings,
 		ExperimentalContext: r.cbExperimentalCtx,
 		FunctionID:          r.cbFuncID,
 		Metadata:            r.cbMeta,
@@ -525,6 +759,33 @@ func (r *StreamTextResult) Usage() types.Usage {
 // Only available after stream completes
 func (r *StreamTextResult) ContextManagement() interface{} {
 	return r.contextManagement
+}
+
+// ToolCalls returns tool calls received during streaming.
+// Only populated after stream completes (processStream or ReadAll).
+// Safe to call concurrently with streaming.
+func (r *StreamTextResult) ToolCalls() []types.ToolCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.toolCalls
+}
+
+// ToolResults returns results from tool executions that ran after stream end.
+// Only populated when StreamText was called with callbacks and tool definitions.
+// Safe to call concurrently with streaming.
+func (r *StreamTextResult) ToolResults() []types.ToolResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.toolResults
+}
+
+// Sources returns citation or grounding references accumulated during streaming.
+// Populated by providers such as Perplexity and Google Generative AI.
+// Only populated after stream completes.
+func (r *StreamTextResult) Sources() []types.SourceContent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sources
 }
 
 // Output returns the final parsed typed output after streaming completes.
@@ -593,10 +854,14 @@ func (r *StreamTextResult) Close() error {
 	return r.stream.Close()
 }
 
-// ReadAll reads all chunks from the stream and returns the complete text
+// ReadAll reads all chunks from the stream and returns the complete text.
+// Tool call chunks are collected and stored in the result, but Execute is not
+// called — use StreamText with callbacks for tool execution.
 func (r *StreamTextResult) ReadAll() (string, error) {
 	ctx := context.Background()
 	firstChunk := true
+	var pendingToolCalls []types.ToolCall
+
 	for {
 		chunk, err := r.nextChunk(ctx)
 		if err == io.EOF {
@@ -612,6 +877,11 @@ func (r *StreamTextResult) ReadAll() (string, error) {
 			r.mu.Lock()
 			r.status = StreamStatusStreaming
 			r.mu.Unlock()
+		}
+
+		// Accumulate warnings from stream-start chunks
+		if chunk.Type == provider.ChunkTypeStreamStart {
+			r.warnings = append(r.warnings, chunk.Warnings...)
 		}
 
 		// Accumulate text
@@ -636,6 +906,11 @@ func (r *StreamTextResult) ReadAll() (string, error) {
 			}
 		}
 
+		// Collect tool call chunks.
+		if chunk.Type == provider.ChunkTypeToolCall && chunk.ToolCall != nil {
+			pendingToolCalls = append(pendingToolCalls, *chunk.ToolCall)
+		}
+
 		// Update finish reason, usage, and context management
 		if chunk.Type == provider.ChunkTypeFinish {
 			r.finishReason = chunk.FinishReason
@@ -646,6 +921,18 @@ func (r *StreamTextResult) ReadAll() (string, error) {
 		if chunk.Usage != nil {
 			r.usage = *chunk.Usage
 		}
+
+		// Accumulate provider metadata.
+		if len(chunk.ProviderMetadata) > 0 {
+			r.providerMetadata = chunk.ProviderMetadata
+		}
+	}
+
+	// Store collected tool calls.
+	if len(pendingToolCalls) > 0 {
+		r.mu.Lock()
+		r.toolCalls = pendingToolCalls
+		r.mu.Unlock()
 	}
 
 	// Resolve final typed output if spec was provided and stream completed cleanly.
@@ -661,30 +948,27 @@ func (r *StreamTextResult) ReadAll() (string, error) {
 		r.mu.Unlock()
 	}
 
-	// Record telemetry output attributes if span exists
-	if r.telemetrySpan != nil {
-		// Record output if enabled
-		if r.telemetryOpts != nil && r.telemetryOpts.RecordOutputs {
-			r.telemetrySpan.SetAttributes(attribute.String("ai.response.text", r.text))
-		}
-
-		// Record finish reason
-		r.telemetrySpan.SetAttributes(attribute.String("ai.response.finishReason", string(r.finishReason)))
-
-		// Record usage information
-		if r.usage.InputTokens != nil {
-			r.telemetrySpan.SetAttributes(attribute.Int64("ai.usage.promptTokens", *r.usage.InputTokens))
-		}
-		if r.usage.OutputTokens != nil {
-			r.telemetrySpan.SetAttributes(attribute.Int64("ai.usage.completionTokens", *r.usage.OutputTokens))
-		}
-		if r.usage.TotalTokens != nil {
-			r.telemetrySpan.SetAttributes(attribute.Int64("ai.usage.totalTokens", *r.usage.TotalTokens))
-		}
-
-		// End the telemetry span
-		r.telemetrySpan.End()
+	// Fire OnFinish — integrations record output attributes and end their spans.
+	readAllTelUsage := telemetry.TelemetryUsage{
+		InputTokens:  r.usage.InputTokens,
+		OutputTokens: r.usage.OutputTokens,
+		TotalTokens:  r.usage.TotalTokens,
 	}
+	if r.usage.InputDetails != nil {
+		readAllTelUsage.NoCacheInputTokens = r.usage.InputDetails.NoCacheTokens
+		readAllTelUsage.CacheReadInputTokens = r.usage.InputDetails.CacheReadTokens
+		readAllTelUsage.CacheCreationInputTokens = r.usage.InputDetails.CacheWriteTokens
+	}
+	if r.usage.OutputDetails != nil {
+		readAllTelUsage.OutputTextTokens = r.usage.OutputDetails.TextTokens
+		readAllTelUsage.ReasoningTokens = r.usage.OutputDetails.ReasoningTokens
+	}
+	telemetry.FireOnFinish(r.telemetryCtx, telemetry.TelemetryFinishEvent{
+		FinishReason: string(r.finishReason),
+		Usage:        readAllTelUsage,
+		Text:         r.text,
+		Settings:     r.telemetrySettings,
+	})
 
 	// Mark stream as done.
 	r.mu.Lock()
@@ -725,6 +1009,20 @@ func (r *StreamTextResult) nextChunk(ctx context.Context) (*provider.StreamChunk
 	case <-chunkCtx.Done():
 		return nil, fmt.Errorf("chunk timeout exceeded: %w", chunkCtx.Err())
 	}
+}
+
+// ProviderMetadata returns the most recently received provider-specific metadata
+// from stream chunks. Only populated when the provider emits metadata in chunks.
+// Safe to call concurrently with streaming.
+func (r *StreamTextResult) ProviderMetadata() json.RawMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.providerMetadata
+}
+
+// Warnings returns any provider warnings surfaced via stream-start chunks.
+func (r *StreamTextResult) Warnings() []types.Warning {
+	return r.warnings
 }
 
 // Chunks returns a channel that streams chunks

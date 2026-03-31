@@ -3,8 +3,11 @@ package azure
 import (
 	"context"
 	"fmt"
+	"net/http"
 
+	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
@@ -49,23 +52,24 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
-	// Build request body
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	reqBody := map[string]interface{}{
 		"input": input,
 	}
-
-	// Make API request to Azure-specific endpoint
 	path := fmt.Sprintf("/openai/deployments/%s/embeddings?api-version=%s",
 		m.deploymentID, m.provider.APIVersion())
 
 	var response azureEmbeddingResponse
-	err := m.provider.client.PostJSON(ctx, path, reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    path,
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
 
-	// Convert response
 	if len(response.Data) == 0 {
 		return nil, fmt.Errorf("no embedding returned from Azure OpenAI")
 	}
@@ -76,27 +80,29 @@ func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.Embe
 			InputTokens: response.Usage.PromptTokens,
 			TotalTokens: response.Usage.TotalTokens,
 		},
+		Response: types.EmbeddingResponse{Headers: map[string][]string(httpResp.Headers)},
 	}, nil
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
-	// Build request body
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	reqBody := map[string]interface{}{
 		"input": inputs,
 	}
-
-	// Make API request to Azure-specific endpoint
 	path := fmt.Sprintf("/openai/deployments/%s/embeddings?api-version=%s",
 		m.deploymentID, m.provider.APIVersion())
 
 	var response azureEmbeddingResponse
-	err := m.provider.client.PostJSON(ctx, path, reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    path,
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
 
-	// Convert response
 	embeddings := make([][]float64, len(response.Data))
 	for i, data := range response.Data {
 		embeddings[i] = data.Embedding
@@ -108,12 +114,21 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 			InputTokens: response.Usage.PromptTokens,
 			TotalTokens: response.Usage.TotalTokens,
 		},
+		Responses: []types.EmbeddingResponse{{Headers: map[string][]string(httpResp.Headers)}},
 	}, nil
 }
 
 // handleError converts errors to provider errors
 func (m *EmbeddingModel) handleError(err error) error {
 	return providererrors.NewProviderError("azure-openai", 0, "", err.Error(), err)
+}
+
+// optsHeaders extracts the Headers map from EmbedModelOptions (nil-safe).
+func optsHeaders(opts *provider.EmbedModelOptions) map[string]string {
+	if opts == nil {
+		return nil
+	}
+	return opts.Headers
 }
 
 // azureEmbeddingResponse represents the Azure OpenAI embeddings API response

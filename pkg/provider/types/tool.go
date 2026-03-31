@@ -49,11 +49,30 @@ type Tool struct {
 	// This affects error handling and validation behavior
 	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 
+	// SupportsDeferredResults indicates that this provider-executed tool may not
+	// return its result in the same response that contains the tool call. When
+	// true, the step loop continues even if FinishReason is not ToolCalls,
+	// waiting for the provider to deliver the result in a later response.
+	// Only meaningful when ProviderExecuted is also true.
+	SupportsDeferredResults bool `json:"supportsDeferredResults,omitempty"`
+
 	// ProviderOptions contains provider-specific options for the tool
 	// This allows passing provider-specific configuration without polluting the main Tool struct
 	// Example: Anthropic cache_control, OpenAI response_format, etc.
 	// The value should be provider-specific types (e.g., anthropic.ToolOptions)
 	ProviderOptions interface{} `json:"-"`
+
+	// Type is "function" (default) or "provider" for provider-defined native tools.
+	// When Type is "provider", ProviderID and ProviderArgs specify the native tool.
+	Type string `json:"type,omitempty"`
+
+	// ProviderID is the identifier for provider-defined tools.
+	// Example: "google.google_search", "google.url_context", "google.code_execution"
+	ProviderID string `json:"providerId,omitempty"`
+
+	// ProviderArgs are optional arguments for provider-defined tools.
+	// The structure depends on the specific provider tool.
+	ProviderArgs map[string]interface{} `json:"providerArgs,omitempty"`
 
 	// ========================================================================
 	// Tool Input Streaming Callbacks (for streaming tool calls)
@@ -156,6 +175,17 @@ type ToolCall struct {
 
 	// Arguments to pass to the tool
 	Arguments map[string]interface{} `json:"arguments"`
+
+	// ProviderExecuted indicates if this tool was executed by the provider (not locally).
+	// When true, the provider handled execution server-side (e.g., xAI file_search, web_search).
+	ProviderExecuted bool `json:"providerExecuted,omitempty"`
+
+	// ThoughtSignature is Google's cryptographic token that seals the model's
+	// thinking chain across tool calls. Populated by the Google/Vertex providers
+	// when the API returns a thoughtSignature on a functionCall part. Must be
+	// forwarded verbatim when re-sending the assistant message in multi-turn
+	// conversations so the API can verify the reasoning chain was not modified.
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 }
 
 // ToolResult represents the result of executing a tool
@@ -165,6 +195,9 @@ type ToolResult struct {
 
 	// Name of the tool that was executed
 	ToolName string `json:"toolName"`
+
+	// Input contains the arguments that were passed to the tool
+	Input map[string]interface{} `json:"input,omitempty"`
 
 	// Result of the tool execution
 	Result interface{} `json:"result"`

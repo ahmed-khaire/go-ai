@@ -68,7 +68,7 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 	warnings := []types.Warning{}
 
 	// Extract provider options
-	provOpts, err := extractVideoProviderOptions(opts.ProviderOptions)
+	provOpts, extra, err := extractVideoProviderOptions(opts.ProviderOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 	isEdit := provOpts.VideoURL != nil && *provOpts.VideoURL != ""
 
 	// Build request body
-	body := m.buildRequestBody(opts, provOpts, isEdit)
+	body := m.buildRequestBody(opts, provOpts, extra, isEdit)
 
 	// Determine endpoint
 	endpoint := "/v1/videos/generations"
@@ -126,6 +126,14 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 
 		// Check if done
 		if status.Status == "done" || (status.Status == "" && status.Video != nil && status.Video.URL != "") {
+			// Check for moderation rejection: respect_moderation == false means blocked.
+			if status.Video != nil && status.Video.RespectModeration != nil && !*status.Video.RespectModeration {
+				return nil, &ModerationError{
+					Code:    "",
+					Message: "Video generation was blocked due to a content policy violation.",
+				}
+			}
+
 			if status.Video == nil || status.Video.URL == "" {
 				return nil, providererrors.NewProviderError("xai", 0, "",
 					"Video generation completed but no video URL was returned", nil)
@@ -134,8 +142,9 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 				Status:    polling.JobStatusCompleted,
 				OutputURL: status.Video.URL,
 				Metadata: map[string]interface{}{
-					"video":    status.Video,
-					"model":    status.Model,
+					"video": status.Video,
+					"model": status.Model,
+					"usage": status.Usage,
 				},
 			}, nil
 		}
@@ -163,6 +172,21 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 	// Extract video data from metadata
 	videoData := jobResult.Metadata["video"].(*xaiVideoData)
 
+	// Build xai-scoped metadata.
+	xaiMeta := map[string]interface{}{
+		"requestId": createResp.RequestID,
+		"videoUrl":  videoData.URL,
+	}
+	if videoData.Duration != nil {
+		xaiMeta["duration"] = *videoData.Duration
+	}
+	// Cost is in the top-level usage object, not inside the video object.
+	if usageData, ok := jobResult.Metadata["usage"].(*xaiVideoUsage); ok && usageData != nil {
+		if usageData.CostInUsdTicks != nil {
+			xaiMeta["costInUsdTicks"] = *usageData.CostInUsdTicks
+		}
+	}
+
 	// Build response
 	resp := &provider.VideoModelV3Response{
 		Videos: []provider.VideoModelV3VideoData{
@@ -174,10 +198,7 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 		},
 		Warnings: warnings,
 		ProviderMetadata: map[string]interface{}{
-			"xai": map[string]interface{}{
-				"requestId": createResp.RequestID,
-				"videoUrl":  videoData.URL,
-			},
+			"xai": xaiMeta,
 		},
 		Response: provider.VideoModelV3ResponseInfo{
 			Timestamp: time.Now(),
@@ -186,18 +207,11 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 		},
 	}
 
-	// Add duration if present
-	if videoData.Duration != nil {
-		if meta, ok := resp.ProviderMetadata["xai"].(map[string]interface{}); ok {
-			meta["duration"] = *videoData.Duration
-		}
-	}
-
 	return resp, nil
 }
 
 // buildRequestBody constructs the API request body
-func (m *VideoModel) buildRequestBody(opts *provider.VideoModelV3CallOptions, provOpts *XAIVideoProviderOptions, isEdit bool) map[string]interface{} {
+func (m *VideoModel) buildRequestBody(opts *provider.VideoModelV3CallOptions, provOpts *XAIVideoProviderOptions, extra map[string]interface{}, isEdit bool) map[string]interface{} {
 	body := map[string]interface{}{
 		"model":  m.modelID,
 		"prompt": opts.Prompt,
@@ -234,6 +248,11 @@ func (m *VideoModel) buildRequestBody(opts *provider.VideoModelV3CallOptions, pr
 	// Image-to-video: add source image
 	if opts.Image != nil {
 		body["image"] = m.convertImageToXAIFormat(opts.Image)
+	}
+
+	// Passthrough any extra provider options not handled above.
+	for k, v := range extra {
+		body[k] = v
 	}
 
 	return body
@@ -325,29 +344,44 @@ func mapResolution(resolution string) string {
 	return ""
 }
 
-// extractVideoProviderOptions extracts XAI-specific provider options
-func extractVideoProviderOptions(opts map[string]interface{}) (*XAIVideoProviderOptions, error) {
+// extractVideoProviderOptions extracts XAI-specific provider options and any
+// unrecognized keys (which are passed through to the API request body).
+func extractVideoProviderOptions(opts map[string]interface{}) (*XAIVideoProviderOptions, map[string]interface{}, error) {
 	if opts == nil {
-		return &XAIVideoProviderOptions{}, nil
+		return &XAIVideoProviderOptions{}, nil, nil
 	}
 
-	xaiOpts, ok := opts["xai"]
+	xaiRaw, ok := opts["xai"]
 	if !ok {
-		return &XAIVideoProviderOptions{}, nil
+		return &XAIVideoProviderOptions{}, nil, nil
 	}
 
 	// Convert to JSON and back to struct
-	jsonData, err := json.Marshal(xaiOpts)
+	jsonData, err := json.Marshal(xaiRaw)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal provider options: %w", err)
+		return nil, nil, fmt.Errorf("failed to marshal provider options: %w", err)
 	}
 
 	var provOpts XAIVideoProviderOptions
 	if err := json.Unmarshal(jsonData, &provOpts); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal provider options: %w", err)
+		return nil, nil, fmt.Errorf("failed to unmarshal provider options: %w", err)
 	}
 
-	return &provOpts, nil
+	// Collect any unrecognized keys for passthrough to the API.
+	known := map[string]bool{
+		"pollIntervalMs": true, "pollTimeoutMs": true,
+		"resolution": true, "videoUrl": true,
+	}
+	extra := make(map[string]interface{})
+	if rawMap, ok := xaiRaw.(map[string]interface{}); ok {
+		for k, v := range rawMap {
+			if !known[k] {
+				extra[k] = v
+			}
+		}
+	}
+
+	return &provOpts, extra, nil
 }
 
 // handleError converts provider errors
@@ -365,14 +399,20 @@ type xaiVideoCreateResponse struct {
 
 // xaiVideoStatusResponse represents the video status API response
 type xaiVideoStatusResponse struct {
-	Status string             `json:"status"`
-	Video  *xaiVideoData      `json:"video,omitempty"`
-	Model  string             `json:"model,omitempty"`
+	Status string         `json:"status"`
+	Video  *xaiVideoData  `json:"video,omitempty"`
+	Model  string         `json:"model,omitempty"`
+	Usage  *xaiVideoUsage `json:"usage,omitempty"`
+}
+
+// xaiVideoUsage holds top-level usage data from the video status response.
+type xaiVideoUsage struct {
+	CostInUsdTicks *int64 `json:"cost_in_usd_ticks,omitempty"`
 }
 
 // xaiVideoData represents video data in the status response
 type xaiVideoData struct {
-	URL                string   `json:"url"`
-	Duration           *float64 `json:"duration,omitempty"`
-	RespectModeration  *bool    `json:"respect_moderation,omitempty"`
+	URL               string   `json:"url"`
+	Duration          *float64 `json:"duration,omitempty"`
+	RespectModeration *bool    `json:"respect_moderation,omitempty"`
 }

@@ -124,7 +124,7 @@ func (m *VideoModel) DoGenerate(ctx context.Context, opts *provider.VideoModelV3
 	if err != nil {
 		return nil, m.handleError(err)
 	}
-	defer httpResp.Body.Close()
+	defer httpResp.Body.Close() //nolint:errcheck
 
 	// Read and parse the SSE stream
 	result, err := m.readSSEVideoResponse(ctx, httpResp.Body)
@@ -236,11 +236,11 @@ func (m *VideoModel) readSSEVideoResponse(ctx context.Context, body io.Reader) (
 			return nil, ctx.Err()
 		default:
 		}
-		return nil, fmt.Errorf("SSE stream read error: %w", err)
+		return nil, fmt.Errorf("LSSE stream read error: %w", err)
 	}
 
 	// Stream ended without a result or error event
-	return nil, fmt.Errorf("SSE stream ended without completion event")
+	return nil, fmt.Errorf("LSSE stream ended without completion event")
 }
 
 // buildResponseFromSSEEvent converts a result SSEVideoEvent into a VideoModelV3Response.

@@ -156,24 +156,24 @@ func (w *SSEWriter) WriteEvent(event SSEEvent) error {
 
 	// Write event type if present
 	if event.Event != "" {
-		buf.WriteString(fmt.Sprintf("event: %s\n", event.Event))
+		fmt.Fprintf(&buf, "event: %s\n", event.Event)
 	}
 
 	// Write ID if present
 	if event.ID != "" {
-		buf.WriteString(fmt.Sprintf("id: %s\n", event.ID))
+		fmt.Fprintf(&buf, "id: %s\n", event.ID)
 	}
 
 	// Write retry if present
 	if event.Retry > 0 {
-		buf.WriteString(fmt.Sprintf("retry: %d\n", event.Retry))
+		fmt.Fprintf(&buf, "retry: %d\n", event.Retry)
 	}
 
 	// Write data (can be multiple lines)
 	if event.Data != "" {
 		lines := strings.Split(event.Data, "\n")
 		for _, line := range lines {
-			buf.WriteString(fmt.Sprintf("data: %s\n", line))
+			fmt.Fprintf(&buf, "data: %s\n", line)
 		}
 	}
 

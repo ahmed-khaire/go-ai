@@ -2,8 +2,11 @@ package cohere
 
 import (
 	"context"
+	"net/http"
 
+	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
@@ -54,20 +57,23 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
-	result, err := m.DoEmbedMany(ctx, []string{input})
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
+	result, err := m.DoEmbedMany(ctx, []string{input}, opts)
 	if err != nil {
 		return nil, err
 	}
-	return &types.EmbeddingResult{
+	r := &types.EmbeddingResult{
 		Embedding: result.Embeddings[0],
 		Usage:     result.Usage,
-	}, nil
+	}
+	if len(result.Responses) > 0 {
+		r.Response = result.Responses[0]
+	}
+	return r, nil
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
-	// Validate options
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	if err := m.options.Validate(); err != nil {
 		return nil, err
 	}
@@ -77,25 +83,25 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 		"model": m.modelID,
 	}
 
-	// Add input type if specified
 	if m.options.InputType != "" {
 		reqBody["input_type"] = string(m.options.InputType)
 	} else {
 		reqBody["input_type"] = "search_document"
 	}
-
-	// Add truncate mode if specified
 	if m.options.Truncate != "" {
 		reqBody["truncate"] = string(m.options.Truncate)
 	}
-
-	// Add output dimension if specified
 	if m.options.OutputDimension != nil {
 		reqBody["output_dimension"] = int(*m.options.OutputDimension)
 	}
 
 	var response cohereEmbedResponse
-	err := m.provider.client.PostJSON(ctx, "/v1/embed", reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    "/v1/embed",
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, providererrors.NewProviderError("cohere", 0, "", err.Error(), err)
 	}
@@ -105,7 +111,16 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 			InputTokens: response.Meta.BilledUnits.InputTokens,
 			TotalTokens: response.Meta.BilledUnits.InputTokens,
 		},
+		Responses: []types.EmbeddingResponse{{Headers: map[string][]string(httpResp.Headers)}},
 	}, nil
+}
+
+// optsHeaders extracts the Headers map from EmbedModelOptions (nil-safe).
+func optsHeaders(opts *provider.EmbedModelOptions) map[string]string {
+	if opts == nil {
+		return nil
+	}
+	return opts.Headers
 }
 
 type cohereEmbedResponse struct {

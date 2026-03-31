@@ -135,7 +135,7 @@ func TestImageModel_DoGenerate_Imagen(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -230,7 +230,7 @@ func TestImageModel_DoGenerate_Gemini(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -263,7 +263,7 @@ func TestImageModel_DoGenerate_WithAspectRatio(t *testing.T) {
 	// Create mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
 
 		// Verify aspect ratio is set
 		params := reqBody["parameters"].(map[string]interface{})
@@ -283,7 +283,7 @@ func TestImageModel_DoGenerate_WithAspectRatio(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -314,7 +314,7 @@ func TestImageModel_DoGenerate_Error_EmptyPredictions(t *testing.T) {
 			}{},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -338,7 +338,7 @@ func TestImageModel_DoGenerate_Error_EmptyPredictions(t *testing.T) {
 func TestImageModel_DoGenerate_Error_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": {"code": 401, "message": "Unauthorized"}}`))
+		_, _ = w.Write([]byte(`{"error": {"code": 401, "message": "Unauthorized"}}`))
 	}))
 	defer server.Close()
 
@@ -557,7 +557,7 @@ func TestResolveVertexImageSize(t *testing.T) {
 func TestImageModel_DoGenerate_WithAspectRatioField(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
 
 		params := reqBody["parameters"].(map[string]interface{})
 		assert.Equal(t, "9:16", params["aspectRatio"])
@@ -575,7 +575,7 @@ func TestImageModel_DoGenerate_WithAspectRatioField(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -600,7 +600,7 @@ func TestImageModel_DoGenerate_WithAspectRatioField(t *testing.T) {
 func TestImageModel_DoGenerate_WithSampleImageSize(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
 
 		params := reqBody["parameters"].(map[string]interface{})
 		assert.Equal(t, "2K", params["sampleImageSize"])
@@ -618,7 +618,7 @@ func TestImageModel_DoGenerate_WithSampleImageSize(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -701,7 +701,7 @@ func TestImageModel_DoGenerate_Gemini_ErrorMultipleImages(t *testing.T) {
 func TestImageModel_DoGenerate_Imagen_WithSeed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
 
 		params := reqBody["parameters"].(map[string]interface{})
 		assert.Equal(t, float64(99), params["seed"], "seed should be in parameters")
@@ -719,7 +719,7 @@ func TestImageModel_DoGenerate_Imagen_WithSeed(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -747,7 +747,7 @@ func TestImageModel_DoGenerate_Imagen_WithSeed(t *testing.T) {
 func TestImageModel_DoGenerate_Imagen_FullProviderOptions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
 
 		// negativePrompt is in the instance
 		instances := reqBody["instances"].([]interface{})
@@ -774,7 +774,7 @@ func TestImageModel_DoGenerate_Imagen_FullProviderOptions(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -808,7 +808,7 @@ func TestImageModel_DoGenerate_Imagen_FullProviderOptions(t *testing.T) {
 func TestImageModel_DoGenerate_Gemini_WithSeed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
 
 		genConfig := reqBody["generationConfig"].(map[string]interface{})
 		assert.Equal(t, float64(7), genConfig["seed"], "seed should be in generationConfig")
@@ -845,7 +845,7 @@ func TestImageModel_DoGenerate_Gemini_WithSeed(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
 	}))
 	defer server.Close()
 

@@ -1,0 +1,248 @@
+package streaming
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+
+	"github.com/digitallysavvy/go-ai/pkg/provider"
+	"github.com/digitallysavvy/go-ai/pkg/provider/types"
+)
+
+// openAICompatAccumToolCall holds partial tool call state accumulated across SSE deltas.
+type openAICompatAccumToolCall struct {
+	id        string
+	name      string
+	arguments string // concatenated JSON argument fragments
+}
+
+// OpenAICompatStream implements the accumulate-and-flush streaming pattern for
+// any provider that uses the OpenAI chat completions SSE format.
+//
+// Security: tool call arguments are accumulated across all SSE deltas and only
+// emitted when finish_reason is received, preventing early finalization based on
+// JSON parsability of intermediate fragments.
+//
+// Embed this struct in provider-specific stream types to inherit Next/Err/Close.
+type OpenAICompatStream struct {
+	reader             io.ReadCloser
+	parser             *SSEParser
+	err                error
+	toolCallAccum      map[int]*openAICompatAccumToolCall
+	flushQueue         []*provider.StreamChunk
+	finishReasonMapper func(string) types.FinishReason
+	// OnExtraDelta is an optional hook called with raw SSE event bytes before
+	// standard delta processing. If it returns (chunk, true), that chunk is
+	// returned immediately. Return (nil, false) to fall through to standard
+	// processing. Use this to handle provider-specific delta fields (e.g. xAI's
+	// reasoning_content).
+	OnExtraDelta func(eventBytes []byte) (*provider.StreamChunk, bool)
+
+	// OnBeforeDelta is an optional hook called with raw SSE event bytes before
+	// standard delta processing. Any chunks it returns are prepended to the
+	// flush queue; standard processing continues regardless. Use this to inject
+	// additional chunks from top-level event fields that standard processing
+	// does not handle (e.g. xAI's top-level citations array).
+	OnBeforeDelta func(eventBytes []byte) []*provider.StreamChunk
+
+	// OnReasoningDelta extracts reasoning text from the raw SSE event bytes.
+	// Called before standard text/tool processing. If it returns (text, true)
+	// where text != "", the stream manages reasoning-start/delta/end blocks.
+	// If it returns ("", true), hook handled it but no reasoning text (no-op).
+	// If it returns ("", false), standard processing continues unchanged.
+	OnReasoningDelta func(eventBytes []byte) (text string, ok bool)
+
+	// isActiveReasoning tracks whether we are inside a reasoning block.
+	isActiveReasoning bool
+}
+
+// NewOpenAICompatStream creates a new OpenAICompatStream.
+// mapper converts a raw finish_reason string to a types.FinishReason.
+// Pass providerutils.MapOpenAIFinishReason for the standard mapping, or a
+// custom function for providers that extend the standard set (e.g. Mistral's
+// "model_length").
+func NewOpenAICompatStream(reader io.ReadCloser, mapper func(string) types.FinishReason) *OpenAICompatStream {
+	return &OpenAICompatStream{
+		reader:             reader,
+		parser:             NewSSEParser(reader),
+		toolCallAccum:      make(map[int]*openAICompatAccumToolCall),
+		finishReasonMapper: mapper,
+	}
+}
+
+// Close closes the underlying HTTP response body.
+func (s *OpenAICompatStream) Close() error {
+	return s.reader.Close()
+}
+
+// Err returns any non-EOF error that occurred during streaming.
+func (s *OpenAICompatStream) Err() error {
+	if s.err == io.EOF {
+		return nil
+	}
+	return s.err
+}
+
+// Next returns the next chunk from the stream.
+//
+// Text deltas are returned immediately. Tool call deltas are silently
+// accumulated; when finish_reason is received, all accumulated tool calls are
+// enqueued followed by a finish chunk, and the queue is drained one chunk per
+// call.
+func (s *OpenAICompatStream) Next() (*provider.StreamChunk, error) {
+	// Drain any fully-assembled chunks before reading more SSE events.
+	if len(s.flushQueue) > 0 {
+		chunk := s.flushQueue[0]
+		s.flushQueue = s.flushQueue[1:]
+		return chunk, nil
+	}
+
+	if s.err != nil {
+		return nil, s.err
+	}
+
+	event, err := s.parser.Next()
+	if err != nil {
+		s.err = err
+		return nil, err
+	}
+
+	if IsStreamDone(event) {
+		s.err = io.EOF
+		return nil, io.EOF
+	}
+
+	// The OpenAI-compatible SSE format sends choices[0].delta for streaming.
+	// Tool call deltas include an "index" field used to correlate fragments
+	// belonging to the same tool call across multiple events.
+	var chunkData struct {
+		Choices []struct {
+			Delta struct {
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Index    int     `json:"index"`
+					ID       string  `json:"id"`
+					Type     *string `json:"type"` // nullable mid-stream
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls,omitempty"`
+			} `json:"delta"`
+			FinishReason *string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal([]byte(event.Data), &chunkData); err != nil {
+		return nil, fmt.Errorf("failed to parse stream chunk: %w", err)
+	}
+
+	// Pre-delta hook: enqueue extra chunks (e.g. top-level citations) before
+	// standard processing. Prepend so they drain before the finish chunk.
+	if s.OnBeforeDelta != nil {
+		if extra := s.OnBeforeDelta([]byte(event.Data)); len(extra) > 0 {
+			s.flushQueue = append(extra, s.flushQueue...)
+		}
+	}
+
+	// Provider-specific delta hook (e.g. xAI reasoning_content).
+	if s.OnExtraDelta != nil {
+		if chunk, handled := s.OnExtraDelta([]byte(event.Data)); handled {
+			return chunk, nil
+		}
+	}
+
+	// Reasoning delta hook — manage start/end lifecycle.
+	if s.OnReasoningDelta != nil {
+		if rc, handled := s.OnReasoningDelta([]byte(event.Data)); handled && rc != "" {
+			if !s.isActiveReasoning {
+				s.isActiveReasoning = true
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningStart, ID: "reasoning-0"},
+					{Type: provider.ChunkTypeReasoning, Reasoning: rc, ID: "reasoning-0"},
+				}, s.flushQueue...)
+				return s.Next()
+			}
+			return &provider.StreamChunk{
+				Type:      provider.ChunkTypeReasoning,
+				Reasoning: rc,
+				ID:        "reasoning-0",
+			}, nil
+		}
+	}
+
+	if len(chunkData.Choices) > 0 {
+		choice := chunkData.Choices[0]
+
+		// Text delta — emit immediately.
+		if choice.Delta.Content != "" {
+			if s.isActiveReasoning {
+				s.isActiveReasoning = false
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"},
+					{Type: provider.ChunkTypeText, Text: choice.Delta.Content},
+				}, s.flushQueue...)
+				return s.Next()
+			}
+			return &provider.StreamChunk{
+				Type: provider.ChunkTypeText,
+				Text: choice.Delta.Content,
+			}, nil
+		}
+
+		// Tool call delta — accumulate arguments by index, never emit yet.
+		if len(choice.Delta.ToolCalls) > 0 {
+			for _, tc := range choice.Delta.ToolCalls {
+				accum, ok := s.toolCallAccum[tc.Index]
+				if !ok {
+					accum = &openAICompatAccumToolCall{}
+					s.toolCallAccum[tc.Index] = accum
+				}
+				if tc.ID != "" {
+					accum.id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					accum.name = tc.Function.Name
+				}
+				accum.arguments += tc.Function.Arguments
+			}
+			return s.Next()
+		}
+
+		// Finish event — flush all accumulated tool calls, then emit finish.
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			if s.isActiveReasoning {
+				s.isActiveReasoning = false
+				s.flushQueue = append([]*provider.StreamChunk{
+					{Type: provider.ChunkTypeReasoningEnd, ID: "reasoning-0"},
+				}, s.flushQueue...)
+			}
+			for i := 0; i < len(s.toolCallAccum); i++ {
+				accum, ok := s.toolCallAccum[i]
+				if !ok {
+					continue
+				}
+				var args map[string]interface{}
+				if accum.arguments != "" {
+					_ = json.Unmarshal([]byte(accum.arguments), &args) //nolint:errcheck
+				}
+				s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
+					Type: provider.ChunkTypeToolCall,
+					ToolCall: &types.ToolCall{
+						ID:        accum.id,
+						ToolName:  accum.name,
+						Arguments: args,
+					},
+				})
+			}
+			s.flushQueue = append(s.flushQueue, &provider.StreamChunk{
+				Type:         provider.ChunkTypeFinish,
+				FinishReason: s.finishReasonMapper(*choice.FinishReason),
+			})
+			return s.Next()
+		}
+	}
+
+	// Empty or unrecognised event — skip and fetch the next one.
+	return s.Next()
+}

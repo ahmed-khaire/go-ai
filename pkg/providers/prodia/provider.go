@@ -3,6 +3,7 @@ package prodia
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	"github.com/digitallysavvy/go-ai/pkg/provider"
@@ -23,6 +24,9 @@ type Config struct {
 	// BaseURL is the base URL for the Prodia API (optional).
 	// Defaults to https://inference.prodia.com/v2
 	BaseURL string
+
+	// Headers contains custom headers to include in all requests.
+	Headers map[string]string
 }
 
 // New creates a new Prodia provider with the given configuration.
@@ -39,12 +43,17 @@ func New(cfg Config) *Provider {
 		apiKey = os.Getenv("PRODIA_TOKEN")
 	}
 
+	headers := map[string]string{
+		"Authorization": "Bearer " + apiKey,
+		"Content-Type":  "application/json",
+	}
+	for k, v := range cfg.Headers {
+		headers[k] = v
+	}
+
 	client := internalhttp.NewClient(internalhttp.Config{
 		BaseURL: baseURL,
-		Headers: map[string]string{
-			"Authorization": "Bearer " + apiKey,
-			"Content-Type":  "application/json",
-		},
+		Headers: headers,
 	})
 
 	return &Provider{
@@ -58,9 +67,46 @@ func (p *Provider) Name() string {
 	return "prodia"
 }
 
-// LanguageModel returns a language model by ID
+// effectiveBaseURL returns the resolved base URL, applying the default when
+// Config.BaseURL was left empty.
+func (p *Provider) effectiveBaseURL() string {
+	if p.config.BaseURL != "" {
+		return p.config.BaseURL
+	}
+	return "https://inference.prodia.com/v2"
+}
+
+// effectiveAPIKey returns the API key, falling back to the PRODIA_TOKEN
+// environment variable when Config.APIKey was not set.
+func (p *Provider) effectiveAPIKey() string {
+	if p.config.APIKey != "" {
+		return p.config.APIKey
+	}
+	return os.Getenv("PRODIA_TOKEN")
+}
+
+// LanguageModel returns a language model by ID.
+// Routes inference.nano-banana.* model IDs to ProdiaLanguageModel.
 func (p *Provider) LanguageModel(modelID string) (provider.LanguageModel, error) {
-	return nil, fmt.Errorf("prodia does not support language models")
+	if modelID == "" {
+		modelID = LanguageModelNanoBananaImgToImgV2
+	}
+	if strings.HasPrefix(modelID, "inference.nano-banana.") {
+		return NewLanguageModel(p, modelID), nil
+	}
+	return nil, fmt.Errorf("prodia: unsupported language model %q", modelID)
+}
+
+// VideoModel returns a video generation model by ID.
+// Routes inference.wan2-2.* model IDs to ProdiaVideoModel.
+func (p *Provider) VideoModel(modelID string) (provider.VideoModelV3, error) {
+	if modelID == "" {
+		modelID = VideoModelWan22LightningTxt2Vid
+	}
+	if strings.HasPrefix(modelID, "inference.wan2-2.") {
+		return NewVideoModel(p, modelID), nil
+	}
+	return nil, fmt.Errorf("prodia: unsupported video model %q", modelID)
 }
 
 // EmbeddingModel returns an embedding model by ID

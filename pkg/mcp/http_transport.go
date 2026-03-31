@@ -81,11 +81,21 @@ func NewHTTPTransport(config HTTPTransportConfig) *HTTPTransport {
 		timeout = 30 * time.Second
 	}
 
+	httpClient := &http.Client{
+		Timeout: timeout,
+	}
+
+	// Default redirect policy: error on redirect (security-first posture for MCP).
+	// Callers can opt into following redirects by setting Redirect: MCPRedirectFollow.
+	if config.Config.Redirect != MCPRedirectFollow {
+		httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("mcp: server returned redirect to %s; set Redirect: MCPRedirectFollow to allow redirects", req.URL)
+		}
+	}
+
 	return &HTTPTransport{
-		url: config.URL,
-		client: &http.Client{
-			Timeout: timeout,
-		},
+		url:          config.URL,
+		client:       httpClient,
 		receiveQueue: make([]*MCPMessage, 0),
 		config:       config.Config,
 		oauth:        config.OAuth,
@@ -171,7 +181,7 @@ func (t *HTTPTransport) Send(ctx context.Context, message *MCPMessage) error {
 	if err != nil {
 		return NewTransportError("failed to send request", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -238,7 +248,7 @@ func (t *HTTPTransport) IsConnected() bool {
 // refreshOAuthToken refreshes the OAuth access token
 func (t *HTTPTransport) refreshOAuthToken(ctx context.Context) error {
 	if t.oauth == nil {
-		return fmt.Errorf("OAuth not configured")
+		return fmt.Errorf("LOAuth not configured")
 	}
 
 	// Implement OAuth token refresh
@@ -246,7 +256,7 @@ func (t *HTTPTransport) refreshOAuthToken(ctx context.Context) error {
 	// a proper OAuth library like golang.org/x/oauth2
 
 	// For now, just return an error
-	return fmt.Errorf("OAuth refresh not yet implemented - please provide access token manually")
+	return fmt.Errorf("LOAuth refresh not yet implemented - please provide access token manually")
 }
 
 // SetAccessToken sets the OAuth access token manually

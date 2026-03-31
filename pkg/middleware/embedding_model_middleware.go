@@ -103,7 +103,7 @@ func (w *wrappedEmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (w *wrappedEmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+func (w *wrappedEmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	// Transform input if middleware provides transformInput
 	transformedInput := input
 	if w.middleware.TransformInput != nil {
@@ -116,7 +116,7 @@ func (w *wrappedEmbeddingModel) DoEmbed(ctx context.Context, input string) (*typ
 
 	// Create the doEmbed function
 	doEmbed := func() (*types.EmbeddingResult, error) {
-		return w.model.DoEmbed(ctx, transformedInput)
+		return w.model.DoEmbed(ctx, transformedInput, opts)
 	}
 
 	// Wrap embed if middleware provides wrapEmbed
@@ -128,10 +128,10 @@ func (w *wrappedEmbeddingModel) DoEmbed(ctx context.Context, input string) (*typ
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (w *wrappedEmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (w *wrappedEmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	// Create the doEmbedMany function
 	doEmbedMany := func() (*types.EmbeddingsResult, error) {
-		return w.model.DoEmbedMany(ctx, inputs)
+		return w.model.DoEmbedMany(ctx, inputs, opts)
 	}
 
 	// Wrap embed many if middleware provides wrapEmbedMany

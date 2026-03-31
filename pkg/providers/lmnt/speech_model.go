@@ -41,12 +41,6 @@ type lmntSpeechRequest struct {
 	Format string  `json:"format,omitempty"`
 }
 
-// lmntSpeechResponse represents the LMNT API response
-type _lmntSpeechResponse struct {
-	Audio    []byte `json:"audio"`
-	Duration float64 `json:"duration"`
-}
-
 // DoGenerate synthesizes speech from text
 func (m *SpeechModel) DoGenerate(ctx context.Context, opts *provider.SpeechGenerateOptions) (*types.SpeechResult, error) {
 	// Build request
@@ -81,12 +75,12 @@ func (m *SpeechModel) DoGenerate(ctx context.Context, opts *provider.SpeechGener
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("LAPI request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	// Read audio data

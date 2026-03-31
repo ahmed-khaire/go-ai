@@ -2,28 +2,69 @@ package prompt
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
-// ToOpenAIMessages converts unified messages to OpenAI format
+// ToOpenAIMessages converts unified messages to OpenAI Chat Completions format.
+//
+// Key invariants maintained:
+//   - Assistant messages that contain tool calls emit a top-level "tool_calls"
+//     array, which OpenAI requires to be present before any "tool" role messages.
+//   - Tool role messages emit "tool_call_id" as a top-level field and their
+//     result as a plain string in "content" — the format OpenAI expects.
 func ToOpenAIMessages(messages []types.Message) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(messages))
 
 	for _, msg := range messages {
+		// ── Tool role messages ────────────────────────────────────────────────
+		// OpenAI requires: {"role":"tool","tool_call_id":"...","content":"..."}
+		// tool_call_id and content are both top-level; there is no content array.
+		if msg.Role == types.RoleTool {
+			for _, part := range msg.Content {
+				if p, ok := part.(types.ToolResultContent); ok {
+					result = append(result, map[string]interface{}{
+						"role":         "tool",
+						"tool_call_id": p.ToolCallID,
+						"content":      openAIToolResultText(p),
+					})
+				}
+			}
+			continue
+		}
+
+		// ── All other roles ───────────────────────────────────────────────────
 		openAIMsg := map[string]interface{}{
 			"role": string(msg.Role),
 		}
 
-		// Handle content
+		// Assistant messages that made tool calls must carry the tool_calls array
+		// so that the subsequent tool role messages are considered valid by OpenAI.
+		if msg.Role == types.RoleAssistant && len(msg.ToolCalls) > 0 {
+			toolCalls := make([]map[string]interface{}, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				argsJSON, _ := json.Marshal(tc.Arguments)
+				toolCalls = append(toolCalls, map[string]interface{}{
+					"id":   tc.ID,
+					"type": "function",
+					"function": map[string]interface{}{
+						"name":      tc.ToolName,
+						"arguments": string(argsJSON),
+					},
+				})
+			}
+			openAIMsg["tool_calls"] = toolCalls
+		}
+
+		// Handle content parts
 		if len(msg.Content) == 1 && msg.Content[0].ContentType() == "text" {
-			// Simple text content
 			if textContent, ok := msg.Content[0].(types.TextContent); ok {
 				openAIMsg["content"] = textContent.Text
 			}
-		} else {
-			// Multi-part content
+		} else if len(msg.Content) > 0 {
 			contentParts := make([]map[string]interface{}, 0, len(msg.Content))
 			for _, part := range msg.Content {
 				switch p := part.(type) {
@@ -33,7 +74,6 @@ func ToOpenAIMessages(messages []types.Message) []map[string]interface{} {
 						"text": p.Text,
 					})
 				case types.ImageContent:
-					// Convert image to base64 if it's raw bytes
 					var imageData string
 					if p.URL != "" {
 						imageData = p.URL
@@ -47,36 +87,26 @@ func ToOpenAIMessages(messages []types.Message) []map[string]interface{} {
 							"url": imageData,
 						},
 					})
-				case types.ToolResultContent:
-					// OpenAI doesn't have a separate tool result content type
-					// Represent as text
-					var resultText string
-					if p.Output != nil && p.Output.Type == types.ToolResultOutputContent {
-						// Extract text from content blocks
-						var textParts []string
-						for _, block := range p.Output.Content {
-							if textBlock, ok := block.(types.TextContentBlock); ok {
-								textParts = append(textParts, textBlock.Text)
-							}
+				case types.CustomContent:
+					// CustomContent in assistant messages may carry OpenAI-specific
+					// provider options. Forward the openai-keyed options verbatim if
+					// present; otherwise skip.
+					if openaiOpts, ok := p.ProviderOptions["openai"].(map[string]interface{}); ok {
+						block := map[string]interface{}{}
+						for k, v := range openaiOpts {
+							block[k] = v
 						}
-						if len(textParts) > 0 {
-							resultText = fmt.Sprintf("Tool %s result: %s", p.ToolName, textParts[0])
-						} else {
-							resultText = fmt.Sprintf("Tool %s result: [complex output]", p.ToolName)
-						}
-					} else {
-						resultText = fmt.Sprintf("Tool %s result: %v", p.ToolName, p.Result)
+						contentParts = append(contentParts, block)
 					}
-					contentParts = append(contentParts, map[string]interface{}{
-						"type": "text",
-						"text": resultText,
-					})
+				case types.ReasoningFileContent:
+					// Reasoning files are not re-sent to OpenAI.
 				}
 			}
-			openAIMsg["content"] = contentParts
+			if len(contentParts) > 0 {
+				openAIMsg["content"] = contentParts
+			}
 		}
 
-		// Add name if present
 		if msg.Name != "" {
 			openAIMsg["name"] = msg.Name
 		}
@@ -85,6 +115,20 @@ func ToOpenAIMessages(messages []types.Message) []map[string]interface{} {
 	}
 
 	return result
+}
+
+// openAIToolResultText extracts a plain string from a ToolResultContent for
+// use as the "content" field of an OpenAI tool role message.
+func openAIToolResultText(p types.ToolResultContent) string {
+	if p.Output != nil && p.Output.Type == types.ToolResultOutputContent {
+		for _, block := range p.Output.Content {
+			if textBlock, ok := block.(types.TextContentBlock); ok {
+				return textBlock.Text
+			}
+		}
+		return fmt.Sprintf("[complex output from %s]", p.ToolName)
+	}
+	return fmt.Sprintf("%v", p.Result)
 }
 
 // ToAnthropicMessages converts unified messages to Anthropic format
@@ -147,6 +191,21 @@ func ToAnthropicMessages(messages []types.Message) []map[string]interface{} {
 							"data":       imageData,
 						},
 					})
+				case types.CustomContent:
+					// CustomContent in assistant messages may carry Anthropic-specific
+					// provider options that the API understands (e.g., future block types).
+					// Forward the anthropic-keyed options verbatim if present; otherwise
+					// skip — custom parts are typically provider metadata (citations, etc.)
+					// that should not be re-sent without explicit configuration.
+					if anthropicOpts, ok := p.ProviderOptions["anthropic"].(map[string]interface{}); ok {
+						block := map[string]interface{}{}
+						for k, v := range anthropicOpts {
+							block[k] = v
+						}
+						contentParts = append(contentParts, block)
+					}
+				case types.ReasoningFileContent:
+					// Reasoning files generated by the model are not re-sent to Anthropic.
 				case types.ToolResultContent:
 					// Check if using new Output style with content blocks
 					if p.Output != nil && p.Output.Type == types.ToolResultOutputContent {
@@ -236,46 +295,309 @@ func ExtractSystemMessage(messages []types.Message) string {
 	return ""
 }
 
-// ToGoogleMessages converts unified messages to Google (Gemini) format
-func ToGoogleMessages(messages []types.Message) []map[string]interface{} {
+// ToGoogleMessages converts unified messages to Google (Gemini) format.
+//
+// supportsFunctionResponseParts controls whether tool results with image/file
+// content are sent using the Gemini 3+ multimodal functionResponse.parts[]
+// format (true) or the legacy fallback for older models (false).
+func ToGoogleMessages(messages []types.Message, supportsFunctionResponseParts bool) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(messages))
 
 	for _, msg := range messages {
-		// Map role to Google format
-		role := "user"
-		if msg.Role == types.RoleAssistant {
-			role = "model"
-		}
+		switch msg.Role {
 
-		googleMsg := map[string]interface{}{
-			"role": role,
-		}
-
-		// Handle content
-		parts := make([]map[string]interface{}, 0, len(msg.Content))
-		for _, part := range msg.Content {
-			switch p := part.(type) {
-			case types.TextContent:
-				parts = append(parts, map[string]interface{}{
-					"text": p.Text,
-				})
-			case types.ImageContent:
-				// Google expects base64 encoded images
-				imageData := base64.StdEncoding.EncodeToString(p.Image)
-				parts = append(parts, map[string]interface{}{
-					"inline_data": map[string]interface{}{
-						"mime_type": p.MimeType,
-						"data":      imageData,
-					},
+		case types.RoleTool:
+			// Tool results go as role "user" with functionResponse parts.
+			// Each ToolResultContent in the message becomes one functionResponse entry.
+			parts := make([]map[string]interface{}, 0, len(msg.Content))
+			for _, part := range msg.Content {
+				if p, ok := part.(types.ToolResultContent); ok {
+					googleAppendFunctionResponse(&parts, p, supportsFunctionResponseParts)
+				}
+			}
+			if len(parts) > 0 {
+				result = append(result, map[string]interface{}{
+					"role":  "user",
+					"parts": parts,
 				})
 			}
-		}
 
-		googleMsg["parts"] = parts
-		result = append(result, googleMsg)
+		case types.RoleAssistant:
+			// Assistant messages use role "model".
+			parts := make([]map[string]interface{}, 0)
+			for _, part := range msg.Content {
+				switch p := part.(type) {
+				case types.TextContent:
+					textPart := map[string]interface{}{"text": p.Text}
+					// Restore thoughtSignature from ProviderMetadata when present so
+					// Google can verify the reasoning chain on the next turn.
+					// Check "google" (Google provider) and "vertex" (Vertex provider) keys.
+					if len(p.ProviderMetadata) > 0 {
+						var meta map[string]interface{}
+						if json.Unmarshal(p.ProviderMetadata, &meta) == nil {
+							for _, key := range []string{"google", "vertex", "googleVertex"} {
+								if provMeta, ok := meta[key].(map[string]interface{}); ok {
+									if sig, ok := provMeta["thoughtSignature"].(string); ok && sig != "" {
+										textPart["thoughtSignature"] = sig
+										break
+									}
+								}
+							}
+						}
+					}
+					parts = append(parts, textPart)
+				case types.ReasoningContent:
+					// Emit thought parts with the cryptographic signature Google uses to
+					// verify the reasoning chain was not modified across turns.
+					// Only emit when there is text or a signature — empty blocks are skipped.
+					if p.Text != "" || p.Signature != "" {
+						thoughtPart := map[string]interface{}{
+							"thought": true,
+							"text":    p.Text,
+						}
+						if p.Signature != "" {
+							thoughtPart["thoughtSignature"] = p.Signature
+						}
+						parts = append(parts, thoughtPart)
+					}
+				case types.ImageContent:
+					imageData := base64.StdEncoding.EncodeToString(p.Image)
+					parts = append(parts, map[string]interface{}{
+						"inlineData": map[string]interface{}{
+							"mimeType": p.MimeType,
+							"data":     imageData,
+						},
+					})
+				case types.CustomContent:
+					if googleOpts, ok := p.ProviderOptions["google"].(map[string]interface{}); ok {
+						block := map[string]interface{}{}
+						for k, v := range googleOpts {
+							block[k] = v
+						}
+						parts = append(parts, block)
+					}
+				case types.ReasoningFileContent:
+					// Reasoning files are not re-sent to Google.
+				}
+			}
+			// Emit functionCall parts for any tool calls the model made.
+			// Include ThoughtSignature at part level when present so Google can
+			// verify the sealed reasoning chain in multi-turn conversations.
+			for _, tc := range msg.ToolCalls {
+				fcPart := map[string]interface{}{
+					"functionCall": map[string]interface{}{
+						"name": tc.ToolName,
+						"args": tc.Arguments,
+					},
+				}
+				if tc.ThoughtSignature != "" {
+					fcPart["thoughtSignature"] = tc.ThoughtSignature
+				}
+				parts = append(parts, fcPart)
+			}
+			result = append(result, map[string]interface{}{
+				"role":  "model",
+				"parts": parts,
+			})
+
+		default:
+			// User (and any other) role → "user".
+			parts := make([]map[string]interface{}, 0, len(msg.Content))
+			for _, part := range msg.Content {
+				switch p := part.(type) {
+				case types.TextContent:
+					parts = append(parts, map[string]interface{}{"text": p.Text})
+				case types.ImageContent:
+					// When a URL is provided use fileData (Cloud Storage / GCS URI).
+					// Otherwise send as base64-encoded inlineData.
+					if p.URL != "" {
+						mimeType := p.MimeType
+						if mimeType == "image/*" {
+							mimeType = "image/jpeg"
+						}
+						parts = append(parts, map[string]interface{}{
+							"fileData": map[string]interface{}{
+								"mimeType": mimeType,
+								"fileUri":  p.URL,
+							},
+						})
+					} else {
+						imageData := base64.StdEncoding.EncodeToString(p.Image)
+						parts = append(parts, map[string]interface{}{
+							"inlineData": map[string]interface{}{
+								"mimeType": p.MimeType,
+								"data":     imageData,
+							},
+						})
+					}
+				case types.FileContent:
+					// FileContent with a URL string stored in Filename acts as a file URI.
+					// The Go FileContent type doesn't have a URL field, so inline only.
+					fileData := base64.StdEncoding.EncodeToString(p.Data)
+					parts = append(parts, map[string]interface{}{
+						"inlineData": map[string]interface{}{
+							"mimeType": p.MimeType,
+							"data":     fileData,
+						},
+					})
+				case types.CustomContent:
+					if googleOpts, ok := p.ProviderOptions["google"].(map[string]interface{}); ok {
+						block := map[string]interface{}{}
+						for k, v := range googleOpts {
+							block[k] = v
+						}
+						parts = append(parts, block)
+					}
+				case types.ReasoningFileContent:
+					// Reasoning files are not re-sent to Google.
+				}
+			}
+			result = append(result, map[string]interface{}{
+				"role":  "user",
+				"parts": parts,
+			})
+		}
 	}
 
 	return result
+}
+
+// googleAppendFunctionResponse appends a functionResponse part (or parts) for
+// a single ToolResultContent to the given parts slice.
+func googleAppendFunctionResponse(parts *[]map[string]interface{}, p types.ToolResultContent, supportsFunctionResponseParts bool) {
+	if p.Output != nil && p.Output.Type == types.ToolResultOutputContent {
+		if supportsFunctionResponseParts {
+			googleAppendToolResultParts(parts, p.ToolName, p.Output.Content)
+		} else {
+			googleAppendLegacyToolResultParts(parts, p.ToolName, p.Output.Content)
+		}
+		return
+	}
+
+	// Simple text/JSON result or error output.
+	content := fmt.Sprintf("%v", p.Result)
+	if p.Output != nil {
+		switch p.Output.Type {
+		case types.ToolResultOutputError:
+			if p.Output.Value != nil {
+				content = fmt.Sprintf("%v", p.Output.Value)
+			} else {
+				content = "Tool execution failed."
+			}
+		case types.ToolResultOutputExecutionDenied:
+			// The tool was blocked by the user approval gate before it ran.
+			// Match TS SDK exactly: use reason directly, or default fallback.
+			if p.Output.Reason != "" {
+				content = p.Output.Reason
+			} else {
+				content = "Tool execution denied."
+			}
+		default:
+			if p.Output.Value != nil {
+				content = fmt.Sprintf("%v", p.Output.Value)
+			}
+		}
+	}
+	*parts = append(*parts, map[string]interface{}{
+		"functionResponse": map[string]interface{}{
+			"name": p.ToolName,
+			"response": map[string]interface{}{
+				"name":    p.ToolName,
+				"content": content,
+			},
+		},
+	})
+}
+
+// googleAppendToolResultParts implements the Gemini 3+ multimodal
+// functionResponse format: text goes into response.content, binary data
+// (images/files) go into functionResponse.parts[] as inlineData.
+func googleAppendToolResultParts(parts *[]map[string]interface{}, toolName string, blocks []types.ToolResultContentBlock) {
+	var textParts []string
+	var responseParts []map[string]interface{}
+
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case types.TextContentBlock:
+			textParts = append(textParts, b.Text)
+		case types.ImageContentBlock:
+			responseParts = append(responseParts, map[string]interface{}{
+				"inlineData": map[string]interface{}{
+					"mimeType": b.MediaType,
+					"data":     base64.StdEncoding.EncodeToString(b.Data),
+				},
+			})
+		case types.FileContentBlock:
+			responseParts = append(responseParts, map[string]interface{}{
+				"inlineData": map[string]interface{}{
+					"mimeType": b.MediaType,
+					"data":     base64.StdEncoding.EncodeToString(b.Data),
+				},
+			})
+		default:
+			// Unknown block type — serialize as JSON text.
+			if j, err := json.Marshal(block); err == nil {
+				textParts = append(textParts, string(j))
+			}
+		}
+	}
+
+	responseContent := "Tool executed successfully."
+	if len(textParts) > 0 {
+		responseContent = strings.Join(textParts, "\n")
+	}
+
+	fr := map[string]interface{}{
+		"name": toolName,
+		"response": map[string]interface{}{
+			"name":    toolName,
+			"content": responseContent,
+		},
+	}
+	if len(responseParts) > 0 {
+		fr["parts"] = responseParts
+	}
+	*parts = append(*parts, map[string]interface{}{
+		"functionResponse": fr,
+	})
+}
+
+// googleAppendLegacyToolResultParts implements the pre-Gemini-3 fallback:
+// text becomes a plain functionResponse; images become separate top-level
+// inlineData parts accompanied by a descriptive text part.
+func googleAppendLegacyToolResultParts(parts *[]map[string]interface{}, toolName string, blocks []types.ToolResultContentBlock) {
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case types.TextContentBlock:
+			*parts = append(*parts, map[string]interface{}{
+				"functionResponse": map[string]interface{}{
+					"name": toolName,
+					"response": map[string]interface{}{
+						"name":    toolName,
+						"content": b.Text,
+					},
+				},
+			})
+		case types.ImageContentBlock:
+			*parts = append(*parts,
+				map[string]interface{}{
+					"inlineData": map[string]interface{}{
+						"mimeType": b.MediaType,
+						"data":     base64.StdEncoding.EncodeToString(b.Data),
+					},
+				},
+				map[string]interface{}{
+					"text": "Tool executed successfully and returned this image as a response",
+				},
+			)
+		default:
+			// Unknown types are serialized to JSON and sent as text.
+			j, _ := json.Marshal(block)
+			*parts = append(*parts, map[string]interface{}{
+				"text": string(j),
+			})
+		}
+	}
 }
 
 // SimpleTextToMessages converts a simple text prompt to a message list

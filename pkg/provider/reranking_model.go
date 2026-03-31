@@ -31,4 +31,8 @@ type RerankOptions struct {
 
 	// Custom headers for the request
 	Headers map[string]string
+
+	// ProviderOptions holds provider-specific options keyed by provider name.
+	// Example: map[string]interface{}{"cohere": map[string]interface{}{"returnDocuments": true}}
+	ProviderOptions map[string]interface{}
 }

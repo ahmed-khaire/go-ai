@@ -75,7 +75,7 @@ func main() {
 	e.HideBanner = true
 
 	// Middleware
-	e.Use(middleware.Logger())
+	e.Use(middleware.Logger()) //nolint:staticcheck // intentional use of deprecated API in example
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 	e.Use(middleware.RequestID())
@@ -382,7 +382,7 @@ func customHTTPErrorHandler(err error, c echo.Context) {
 	}
 
 	if !c.Response().Committed {
-		c.JSON(code, map[string]interface{}{
+		_ = c.JSON(code, map[string]interface{}{
 			"error":     message,
 			"requestId": c.Response().Header().Get(echo.HeaderXRequestID),
 			"timestamp": time.Now().Unix(),
@@ -392,10 +392,10 @@ func customHTTPErrorHandler(err error, c echo.Context) {
 
 func sendSSE(w http.ResponseWriter, event, data string) {
 	if event != "" {
-		fmt.Fprintf(w, "event: %s\n", event)
+		_, _ = fmt.Fprintf(w, "event: %s\n", event)
 	}
 	if data != "" {
-		fmt.Fprintf(w, "data: %s\n", data)
+		_, _ = fmt.Fprintf(w, "data: %s\n", data)
 	}
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "\n")
 }

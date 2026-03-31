@@ -120,7 +120,7 @@ func New(cfg Config, opts ...func(*Config)) (*Provider, error) {
 	}
 
 	if apiKey == "" {
-		return nil, fmt.Errorf("AI Gateway API key is required (set via Config.APIKey or AI_GATEWAY_API_KEY environment variable)")
+		return nil, fmt.Errorf("LAI Gateway API key is required (set via Config.APIKey or AI_GATEWAY_API_KEY environment variable)")
 	}
 
 	// Create headers with authentication
@@ -209,17 +209,17 @@ func (p *Provider) VideoModel(modelID string) (provider.VideoModelV3, error) {
 
 // SpeechModel returns a speech synthesis model by ID
 func (p *Provider) SpeechModel(modelID string) (provider.SpeechModel, error) {
-	return nil, fmt.Errorf("Gateway provider does not directly support speech synthesis models")
+	return nil, fmt.Errorf("LGateway provider does not directly support speech synthesis models")
 }
 
 // TranscriptionModel returns a speech-to-text model by ID
 func (p *Provider) TranscriptionModel(modelID string) (provider.TranscriptionModel, error) {
-	return nil, fmt.Errorf("Gateway provider does not directly support transcription models")
+	return nil, fmt.Errorf("LGateway provider does not directly support transcription models")
 }
 
 // RerankingModel returns a reranking model by ID
 func (p *Provider) RerankingModel(modelID string) (provider.RerankingModel, error) {
-	return nil, fmt.Errorf("Gateway provider does not directly support reranking models")
+	return nil, fmt.Errorf("LGateway provider does not directly support reranking models")
 }
 
 // GetAvailableModels returns available providers and models from the gateway

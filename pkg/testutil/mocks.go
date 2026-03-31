@@ -78,8 +78,8 @@ func (m *MockLanguageModel) DoStream(ctx context.Context, opts *provider.Generat
 
 // MockEmbeddingModel is a mock implementation of provider.EmbeddingModel for testing.
 type MockEmbeddingModel struct {
-	DoEmbedFunc     func(ctx context.Context, input string) (*types.EmbeddingResult, error)
-	DoEmbedManyFunc func(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error)
+	DoEmbedFunc     func(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error)
+	DoEmbedManyFunc func(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error)
 	ProviderName    string
 	ModelName       string
 	MaxBatchSize    int
@@ -116,13 +116,13 @@ func (m *MockEmbeddingModel) MaxEmbeddingsPerCall() int {
 }
 func (m *MockEmbeddingModel) SupportsParallelCalls() bool { return m.ParallelSupport }
 
-func (m *MockEmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
+func (m *MockEmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	m.mu.Lock()
 	m.EmbedCalls = append(m.EmbedCalls, input)
 	m.mu.Unlock()
 
 	if m.DoEmbedFunc != nil {
-		return m.DoEmbedFunc(ctx, input)
+		return m.DoEmbedFunc(ctx, input, opts)
 	}
 	return &types.EmbeddingResult{
 		Embedding: []float64{0.1, 0.2, 0.3, 0.4, 0.5},
@@ -130,13 +130,13 @@ func (m *MockEmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.
 	}, nil
 }
 
-func (m *MockEmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *MockEmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	m.mu.Lock()
 	m.EmbedManyCalls = append(m.EmbedManyCalls, inputs)
 	m.mu.Unlock()
 
 	if m.DoEmbedManyFunc != nil {
-		return m.DoEmbedManyFunc(ctx, inputs)
+		return m.DoEmbedManyFunc(ctx, inputs, opts)
 	}
 	embeddings := make([][]float64, len(inputs))
 	for i := range inputs {

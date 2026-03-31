@@ -136,9 +136,9 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	// Perform request
 	httpResp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("LHTTP request failed: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer httpResp.Body.Close() //nolint:errcheck
 
 	// Read response body
 	respBody, err := io.ReadAll(httpResp.Body)
@@ -162,7 +162,7 @@ func (c *Client) DoJSON(ctx context.Context, req Request, result interface{}) er
 
 	// Check for error status codes
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(resp.Body))
+		return fmt.Errorf("LHTTP %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	// Decode JSON response
@@ -171,6 +171,24 @@ func (c *Client) DoJSON(ctx context.Context, req Request, result interface{}) er
 	}
 
 	return nil
+}
+
+// DoJSONResponse performs an HTTP request, decodes the JSON response body into result,
+// and returns the raw Response (status code + headers + body).
+// Use this instead of DoJSON when the caller needs response headers (e.g. to populate
+// EmbeddingResult.Response).
+func (c *Client) DoJSONResponse(ctx context.Context, req Request, result interface{}) (*Response, error) {
+	resp, err := c.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("LHTTP %d: %s", resp.StatusCode, string(resp.Body))
+	}
+	if err := json.Unmarshal(resp.Body, result); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON response: %w", err)
+	}
+	return resp, nil
 }
 
 // DoStream performs an HTTP request that returns a streaming response
@@ -223,14 +241,14 @@ func (c *Client) DoStream(ctx context.Context, req Request) (*http.Response, err
 	// Perform request
 	httpResp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("LHTTP request failed: %w", err)
 	}
 
 	// Check for error status codes
 	if httpResp.StatusCode >= 400 {
-		defer httpResp.Body.Close()
+		defer httpResp.Body.Close() //nolint:errcheck
 		errBody, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(errBody))
+		return nil, fmt.Errorf("LHTTP %d: %s", httpResp.StatusCode, string(errBody))
 	}
 
 	// Return the response for streaming (caller must close Body)

@@ -8,8 +8,6 @@ import (
 	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 	"github.com/digitallysavvy/go-ai/pkg/telemetry"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // now returns the current time in milliseconds since Unix epoch.
@@ -103,6 +101,17 @@ type GenerateTextOptions struct {
 	//
 	// This can reduce memory consumption by 50-80% for image-heavy workloads.
 	ExperimentalRetention *types.RetentionSettings
+
+	// ========================================================================
+	// Reasoning (v6.1 - P0-1)
+	// ========================================================================
+
+	// Reasoning controls how much thinking effort the model applies.
+	// nil means unset (use provider default). Set to types.ReasoningDefault to
+	// explicitly omit from the API request. Providers map this to their native
+	// reasoning APIs (Anthropic: thinking.budget_tokens, OpenAI: reasoning_effort,
+	// Google: thinkingConfig.thinkingBudget, Bedrock: reasoningConfig).
+	Reasoning *types.ReasoningLevel
 
 	// ========================================================================
 	// Provider Options (v6.0.61 - NEW)
@@ -240,57 +249,50 @@ type GenerateTextResult struct {
 	// Warnings from the provider
 	Warnings []types.Warning
 
+	// ProviderMetadata holds provider-specific metadata from the last generation step.
+	ProviderMetadata map[string]interface{}
+
+	// Sources contains citation or grounding references from the final generation step.
+	// Populated by providers such as Perplexity and Google Generative AI.
+	Sources []types.SourceContent
+
 	// Raw request/response (for debugging)
 	RawRequest  interface{}
 	RawResponse interface{}
 }
 
 // GenerateText performs non-streaming text generation with optional tool calling
-func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextResult, error) {
+func GenerateText(ctx context.Context, opts GenerateTextOptions) (result *GenerateTextResult, err error) {
 	// Validate options
 	if opts.Model == nil {
 		return nil, fmt.Errorf("model is required")
 	}
 
-	// Create telemetry span if enabled
-	var span trace.Span
-	if opts.ExperimentalTelemetry != nil && opts.ExperimentalTelemetry.IsEnabled {
-		tracer := telemetry.GetTracer(opts.ExperimentalTelemetry)
-
-		// Create top-level ai.generateText span
-		spanName := "ai.generateText"
-		if opts.ExperimentalTelemetry.FunctionID != "" {
-			spanName = spanName + "." + opts.ExperimentalTelemetry.FunctionID
-		}
-
-		ctx, span = tracer.Start(ctx, spanName)
-		defer span.End()
-
-		// Add base telemetry attributes
-		span.SetAttributes(
-			attribute.String("ai.operationId", "ai.generateText"),
-			attribute.String("ai.model.provider", opts.Model.Provider()),
-			attribute.String("ai.model.id", opts.Model.ModelID()),
-		)
-
-		// Add function ID if present
-		if opts.ExperimentalTelemetry.FunctionID != "" {
-			span.SetAttributes(attribute.String("ai.telemetry.functionId", opts.ExperimentalTelemetry.FunctionID))
-		}
-
-		// Add custom metadata
-		for key, value := range opts.ExperimentalTelemetry.Metadata {
-			span.SetAttributes(attribute.KeyValue{
-				Key:   attribute.Key("ai.telemetry.metadata." + key),
-				Value: value,
-			})
-		}
-
-		// Record prompt if enabled
-		if opts.ExperimentalTelemetry.RecordInputs && opts.Prompt != "" {
-			span.SetAttributes(attribute.String("ai.prompt", opts.Prompt))
-		}
+	// Fire OnStart — registered integrations start their root spans here and
+	// embed them in the returned context.  When no integration is registered
+	// the fire function is a no-op.
+	telPrompt := ""
+	telSystem := ""
+	if opts.ExperimentalTelemetry != nil && opts.ExperimentalTelemetry.RecordInputs {
+		telPrompt = opts.Prompt
+		telSystem = opts.System
 	}
+	ctx = telemetry.FireOnStart(ctx, telemetry.TelemetryStartEvent{
+		OperationType: "ai.generateText",
+		ModelProvider: opts.Model.Provider(),
+		ModelID:       opts.Model.ModelID(),
+		Settings:      opts.ExperimentalTelemetry,
+		Prompt:        telPrompt,
+		System:        telSystem,
+	})
+
+	// Ensure telemetry is always closed — OnError ends the span on failure,
+	// OnFinish ends it on success.
+	defer func() {
+		if err != nil {
+			telemetry.FireOnError(ctx, telemetry.TelemetryErrorEvent{Error: err})
+		}
+	}()
 
 	// Apply total timeout if configured
 	var cancel context.CancelFunc
@@ -326,8 +328,8 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 		Metadata:            cbMeta,
 	}, opts.OnStart)
 
-	// Initialize result
-	result := &GenerateTextResult{
+	// Initialize result (named return — assign, not declare)
+	result = &GenerateTextResult{
 		Steps: []types.StepResult{},
 	}
 
@@ -346,6 +348,15 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 
 	// Current messages for conversation history
 	currentMessages := prompt.Messages
+
+	// Build tool name → pointer map for deferred provider tool tracking.
+	toolsByName := make(map[string]*types.Tool, len(opts.Tools))
+	for i := range opts.Tools {
+		toolsByName[opts.Tools[i].Name] = &opts.Tools[i]
+	}
+	// pendingDeferredToolCalls tracks provider tools whose results will arrive in
+	// a subsequent response (SupportsDeferredResults=true). Key = toolCallID, value = toolName.
+	pendingDeferredToolCalls := make(map[string]string)
 
 	// Execute generation loop (for tool calling)
 	for stepNum := 1; stepNum <= maxSteps; stepNum++ {
@@ -400,6 +411,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 			Tools:            opts.Tools,
 			ToolChoice:       opts.ToolChoice,
 			ResponseFormat:   responseFormat,
+			Reasoning:        opts.Reasoning,
 			ProviderOptions:  opts.ProviderOptions,
 			Telemetry:        opts.ExperimentalTelemetry,
 		}
@@ -408,6 +420,14 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 		genResult, err := opts.Model.DoGenerate(stepCtx, genOpts)
 		if err != nil {
 			return nil, fmt.Errorf("generation failed at step %d: %w", stepNum, err)
+		}
+
+		// Extract sources from content parts
+		var stepSources []types.SourceContent
+		for _, part := range genResult.Content {
+			if src, ok := part.(types.SourceContent); ok {
+				stepSources = append(stepSources, src)
+			}
 		}
 
 		// Create step result
@@ -419,6 +439,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 			FinishReason: genResult.FinishReason,
 			Usage:        genResult.Usage,
 			Warnings:     genResult.Warnings,
+			Sources:      stepSources,
 		}
 
 		// Update accumulated usage
@@ -437,6 +458,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 				experimentalContext: opts.ExperimentalContext,
 				functionID:          cbFuncID,
 				metadata:            cbMeta,
+				timeout:             opts.Timeout,
 			}
 			toolResults, err := executeTools(ctx, genResult.ToolCalls, opts.Tools, opts.ExperimentalContext, &result.Usage, toolCallbacks)
 			if err != nil {
@@ -452,10 +474,13 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 			stepResult.ToolResults = toolResults
 			result.ToolResults = append(result.ToolResults, toolResults...)
 
-			// Add assistant message with tool calls to history
+			// Add assistant message with tool calls to history.
+			// ToolCalls must be carried on the message so providers that require
+			// a top-level tool_calls field (e.g. OpenAI) can emit it correctly.
 			assistantMsg := types.Message{
-				Role:    types.RoleAssistant,
-				Content: []types.ContentPart{},
+				Role:      types.RoleAssistant,
+				Content:   []types.ContentPart{},
+				ToolCalls: genResult.ToolCalls,
 			}
 			if genResult.Text != "" {
 				assistantMsg.Content = append(assistantMsg.Content, types.TextContent{Text: genResult.Text})
@@ -481,10 +506,12 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 			result.Text = genResult.Text
 			result.FinishReason = genResult.FinishReason
 			result.ToolCalls = genResult.ToolCalls
+			result.Sources = stepSources
 			result.ContextManagement = genResult.ContextManagement
 			result.Warnings = append(result.Warnings, genResult.Warnings...)
 			result.RawRequest = genResult.RawRequest
 			result.RawResponse = genResult.RawResponse
+			result.ProviderMetadata = genResult.ProviderMetadata
 
 			// Parse typed output if an Output spec was provided.
 			// Only parse when generation finished cleanly; a 'length' finish means
@@ -499,6 +526,35 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 					return nil, fmt.Errorf("output parsing failed: %w", parseErr)
 				}
 				result.Output = parsed
+			}
+		}
+
+		// Deferred provider tool tracking (mirrors TS SDK pendingDeferredToolCalls).
+		// Scan the current step's tool calls: if a provider tool with SupportsDeferredResults
+		// did not return its result inline in this response, register it as pending so the
+		// step loop continues even when FinishReason is not ToolCalls.
+		// Note: we check tool.ProviderExecuted on the definition (not call.ProviderExecuted)
+		// because some providers (e.g. Anthropic) do not set ProviderExecuted on ToolCalls.
+		for _, call := range genResult.ToolCalls {
+			tool := toolsByName[call.ToolName]
+			if tool == nil || !tool.ProviderExecuted || !tool.SupportsDeferredResults {
+				continue
+			}
+			hasResult := false
+			for _, part := range genResult.Content {
+				if tr, ok := part.(types.ToolResultContent); ok && tr.ToolCallID == call.ID {
+					hasResult = true
+					break
+				}
+			}
+			if !hasResult {
+				pendingDeferredToolCalls[call.ID] = call.ToolName
+			}
+		}
+		// Remove entries resolved by tool-result parts in the current response.
+		for _, part := range genResult.Content {
+			if tr, ok := part.(types.ToolResultContent); ok {
+				delete(pendingDeferredToolCalls, tr.ToolCallID)
 			}
 		}
 
@@ -542,33 +598,37 @@ func GenerateText(ctx context.Context, opts GenerateTextOptions) (*GenerateTextR
 			}
 		}
 
-		// Check if we should continue
-		if genResult.FinishReason != types.FinishReasonToolCalls {
+		// Check if we should continue.
+		// Continue when there are local tool calls pending execution OR when a
+		// provider tool with SupportsDeferredResults has not yet delivered its result.
+		hasLocalToolCalls := genResult.FinishReason == types.FinishReasonToolCalls
+		hasPendingDeferred := len(pendingDeferredToolCalls) > 0
+		if !hasLocalToolCalls && !hasPendingDeferred {
 			break
 		}
 	}
 
-	// Record telemetry output attributes
-	if span != nil {
-		// Record output if enabled
-		if opts.ExperimentalTelemetry != nil && opts.ExperimentalTelemetry.RecordOutputs {
-			span.SetAttributes(attribute.String("ai.response.text", result.Text))
-		}
-
-		// Record finish reason
-		span.SetAttributes(attribute.String("ai.response.finishReason", string(result.FinishReason)))
-
-		// Record usage information
-		if result.Usage.InputTokens != nil {
-			span.SetAttributes(attribute.Int64("ai.usage.promptTokens", *result.Usage.InputTokens))
-		}
-		if result.Usage.OutputTokens != nil {
-			span.SetAttributes(attribute.Int64("ai.usage.completionTokens", *result.Usage.OutputTokens))
-		}
-		if result.Usage.TotalTokens != nil {
-			span.SetAttributes(attribute.Int64("ai.usage.totalTokens", *result.Usage.TotalTokens))
-		}
+	// Fire OnFinish — integrations record output attributes and end their spans.
+	telUsage := telemetry.TelemetryUsage{
+		InputTokens:  result.Usage.InputTokens,
+		OutputTokens: result.Usage.OutputTokens,
+		TotalTokens:  result.Usage.TotalTokens,
 	}
+	if result.Usage.InputDetails != nil {
+		telUsage.NoCacheInputTokens = result.Usage.InputDetails.NoCacheTokens
+		telUsage.CacheReadInputTokens = result.Usage.InputDetails.CacheReadTokens
+		telUsage.CacheCreationInputTokens = result.Usage.InputDetails.CacheWriteTokens
+	}
+	if result.Usage.OutputDetails != nil {
+		telUsage.OutputTextTokens = result.Usage.OutputDetails.TextTokens
+		telUsage.ReasoningTokens = result.Usage.OutputDetails.ReasoningTokens
+	}
+	telemetry.FireOnFinish(ctx, telemetry.TelemetryFinishEvent{
+		FinishReason: string(result.FinishReason),
+		Usage:        telUsage,
+		Text:         result.Text,
+		Settings:     opts.ExperimentalTelemetry,
+	})
 
 	// Call finish callback (v6.0: with user context)
 	if opts.OnFinish != nil {
@@ -615,6 +675,7 @@ type toolCallEventCallbacks struct {
 	experimentalContext interface{}
 	functionID          string
 	metadata            map[string]any
+	timeout             *TimeoutConfig
 }
 
 // executeTools executes a list of tool calls
@@ -645,10 +706,10 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 			continue
 		}
 
-		// Check if this is a provider-executed tool
-		// Provider-executed tools are handled by the LLM provider (e.g., Anthropic, xAI)
-		// and their results come back in the provider's response, not from local execution
-		providerExecuted := isProviderExecutedTool(tool)
+		// Check if this is a provider-executed tool.
+		// ProviderExecuted is set to true on types.Tool by each provider tool constructor
+		// (e.g., web_search_20260209, web_fetch_20260209, code_execution, tool_search_bm25).
+		providerExecuted := tool.ProviderExecuted
 
 		if providerExecuted {
 			// Provider-executed tool: result will come from provider in next response
@@ -656,6 +717,7 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 			results[i] = types.ToolResult{
 				ToolCallID:       call.ID,
 				ToolName:         call.ToolName,
+				Input:            call.Arguments,
 				Result:           nil,
 				Error:            nil,
 				ProviderExecuted: true,
@@ -675,7 +737,15 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 				Metadata:            callbacks.metadata,
 			}, callbacks.onStart)
 
-			// Locally-executed tool: execute now
+			// Fire telemetry OnToolCallStart — integrations may inject a child span.
+			toolCtx := telemetry.FireOnToolCallStart(ctx, telemetry.TelemetryToolCallStartEvent{
+				ToolCallID: call.ID,
+				ToolName:   call.ToolName,
+				Args:       call.Arguments,
+			})
+
+			// Locally-executed tool: execute now, wrapped by telemetry integrations
+			// so they can create nested spans (Gap 4).
 			execOptions := types.ToolExecutionOptions{
 				ToolCallID:  call.ID,
 				UserContext: userContext,
@@ -683,17 +753,43 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 				Metadata:    make(map[string]interface{}),
 			}
 
+			// Apply per-tool timeout if configured.
+			execCtx := toolCtx
+			execCancel := func() {}
+			if toolTimeout := callbacks.timeout.GetToolTimeout(call.ToolName); toolTimeout != nil {
+				execCtx, execCancel = context.WithTimeout(toolCtx, *toolTimeout)
+			}
+
 			startTime := now()
-			toolResult, toolErr := tool.Execute(ctx, call.Arguments, execOptions)
+			toolResult, toolErr := telemetry.FireExecuteTool(
+				execCtx,
+				call.ToolName,
+				call.Arguments,
+				func(execCtx context.Context, args map[string]interface{}) (interface{}, error) {
+					return tool.Execute(execCtx, args, execOptions)
+				},
+			)
 			durationMs := now() - startTime
+			execCancel() // release timeout resources immediately after execution
 
 			results[i] = types.ToolResult{
 				ToolCallID:       call.ID,
 				ToolName:         call.ToolName,
+				Input:            call.Arguments,
 				Result:           toolResult,
 				Error:            toolErr,
 				ProviderExecuted: false,
 			}
+
+			// Fire telemetry OnToolCallFinish (Gap 5 partial: integrations can record errors).
+			telemetry.FireOnToolCallFinish(toolCtx, telemetry.TelemetryToolCallFinishEvent{
+				ToolCallID: call.ID,
+				ToolName:   call.ToolName,
+				Args:       call.Arguments,
+				Result:     toolResult,
+				Error:      toolErr,
+				DurationMs: durationMs,
+			})
 
 			// CB-T17/T18: Emit OnToolCallFinishEvent after execution (success or error)
 			Notify(ctx, OnToolCallFinishEvent{
@@ -715,28 +811,6 @@ func executeTools(ctx context.Context, toolCalls []types.ToolCall, availableTool
 	}
 
 	return results, nil
-}
-
-// isProviderExecutedTool determines if a tool is executed by the provider
-// Provider-executed tools include:
-// - Anthropic: tool-search-bm25, tool-search-regex, web-search, web-fetch, code-execution
-// - xAI: file-search, mcp-server
-// - OpenAI: MCP tools (with approval)
-func isProviderExecutedTool(tool *types.Tool) bool {
-	// Check for common provider-executed tool names
-	providerTools := map[string]bool{
-		// Anthropic built-in tools
-		"tool-search-bm25":  true,
-		"tool-search-regex": true,
-		"web-search":        true,
-		"web-fetch":         true,
-		"code-execution":    true,
-		// xAI tools
-		"file-search": true,
-		"mcp-server":  true,
-	}
-
-	return providerTools[tool.Name]
 }
 
 // validateToolResults validates tool results, especially for provider-executed tools

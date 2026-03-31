@@ -55,7 +55,7 @@ func newAsyncTestServer(t *testing.T, modelID, requestID string, pollResponses [
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 
 		case pollPath:
 			idx := ts.pollCallCount
@@ -66,7 +66,7 @@ func newAsyncTestServer(t *testing.T, modelID, requestID string, pollResponses [
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintln(w, pollResponses[idx])
+			_, _ = fmt.Fprintln(w, pollResponses[idx]) //nolint:errcheck
 
 		default:
 			http.NotFound(w, r)
@@ -77,7 +77,7 @@ func newAsyncTestServer(t *testing.T, modelID, requestID string, pollResponses [
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -134,19 +134,19 @@ func TestDoGenerateAsync_ImmediateSuccess(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			pollCalled = true
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+			_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -192,19 +192,19 @@ func TestDoGenerateAsync_MultiPollSuccess(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			idx := ts.pollCallCount
 			ts.pollCallCount++
 			w.Header().Set("Content-Type", "application/json")
 			switch idx {
 			case 0:
-				fmt.Fprintf(w, `{"id": %q, "status": "Pending", "result": null}`, requestID)
+				_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Pending", "result": null}`, requestID)
 			case 1:
-				fmt.Fprintf(w, `{"id": %q, "status": "Running", "result": null}`, requestID)
+				_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Running", "result": null}`, requestID)
 			default:
 				imageURL := ts.server.URL + "/fake-image"
-				fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+				_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 			}
 		default:
 			http.NotFound(w, r)
@@ -212,7 +212,7 @@ func TestDoGenerateAsync_MultiPollSuccess(t *testing.T) {
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 
 	ts.server = httptest.NewServer(mux)
@@ -254,21 +254,21 @@ func TestDoGenerateAsync_SubmitRequestBody(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 			ts.submitBody = body
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+			_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 	ts.server = httptest.NewServer(mux)
 	defer ts.server.Close()
@@ -425,7 +425,7 @@ func TestDoGenerateSync_NonAsyncModel(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"data": [{"url": "https://example.com/sync.png"}]}`)
+		_, _ = fmt.Fprintln(w, `{"data": [{"url": "https://example.com/sync.png"}]}`) //nolint:errcheck
 	})
 
 	server := httptest.NewServer(mux)
@@ -477,7 +477,7 @@ func TestCheckAsyncStatus_Statuses(t *testing.T) {
 			mux.HandleFunc("/v1/workflows/", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintln(w, respBody)
+				_, _ = fmt.Fprintln(w, respBody) //nolint:errcheck
 			})
 			server := httptest.NewServer(mux)
 			defer server.Close()
@@ -557,18 +557,18 @@ func TestDoGenerateAsync_Warnings(t *testing.T) {
 		switch r.URL.Path {
 		case submitPath:
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"request_id": %q}`, requestID)
+			_, _ = fmt.Fprintf(w, `{"request_id": %q}`, requestID)
 		case pollPath:
 			imageURL := ts.server.URL + "/fake-image"
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
+			_, _ = fmt.Fprintf(w, `{"id": %q, "status": "Ready", "result": {"sample": %q}}`, requestID, imageURL)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 	mux.HandleFunc("/fake-image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(fakeImageBytes)
+		_, _ = w.Write(fakeImageBytes)
 	})
 	ts.server = httptest.NewServer(mux)
 	defer ts.server.Close()

@@ -161,7 +161,7 @@ func main() {
 	} else {
 		// Parse the structured output
 		var recipe Recipe
-		json.Unmarshal([]byte(recipeResult.Text), &recipe)
+		_ = json.Unmarshal([]byte(recipeResult.Text), &recipe)
 		fmt.Printf("Generated Recipe: %s\n", recipe.Name)
 		fmt.Printf("  Prep Time: %d minutes\n", recipe.PrepTime)
 		fmt.Printf("  Ingredients: %d items\n\n", len(recipe.Ingredients))
@@ -301,7 +301,7 @@ func main() {
 		log.Printf("Error generating tasks: %v\n", err)
 	} else {
 		var tasks []Task
-		json.Unmarshal([]byte(tasksResult.Text), &tasks)
+		_ = json.Unmarshal([]byte(tasksResult.Text), &tasks)
 		fmt.Printf("Generated %d tasks:\n", len(tasks))
 		for i, task := range tasks {
 			fmt.Printf("  %d. %s (%s priority, %dh)\n",

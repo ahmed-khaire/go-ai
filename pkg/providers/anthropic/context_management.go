@@ -196,6 +196,34 @@ const (
 	// BetaHeaderFilesAPI is required for the agent container skills system.
 	// It is automatically injected when container skills are present.
 	BetaHeaderFilesAPI = "files-api-2025-04-14"
+
+	// BetaHeaderWebTools20260209 is required for web_search_20260209 and web_fetch_20260209.
+	// Automatically injected when either tool is present in the tool list.
+	BetaHeaderWebTools20260209 = "code-execution-web-tools-2026-02-09"
+
+	// BetaHeaderWebFetch20250910 is required for web_fetch_20250910.
+	// Automatically injected when that tool is present in the tool list.
+	BetaHeaderWebFetch20250910 = "web-fetch-2025-09-10"
+
+	// BetaHeaderComputerUse20241022 is required for computer_20241022, bash_20241022,
+	// and text_editor_20241022. Automatically injected when any of those tools are present.
+	BetaHeaderComputerUse20241022 = "computer-use-2024-10-22"
+
+	// BetaHeaderComputerUse20250124 is required for computer_20250124, bash_20250124,
+	// text_editor_20250124, and text_editor_20250429. Automatically injected when any are present.
+	BetaHeaderComputerUse20250124 = "computer-use-2025-01-24"
+
+	// BetaHeaderComputerUse20251124 is required for computer_20251124.
+	// Automatically injected when that tool is present in the tool list.
+	BetaHeaderComputerUse20251124 = "computer-use-2025-11-24"
+
+	// BetaHeaderCodeExecution20250522 is required for code_execution_20250522.
+	// Automatically injected when that tool is present in the tool list.
+	BetaHeaderCodeExecution20250522 = "code-execution-2025-05-22"
+
+	// BetaHeaderAdvancedToolUse is required when tools use AllowedCallers or InputExamples.
+	// Automatically injected when any tool in the list has either field set.
+	BetaHeaderAdvancedToolUse = "advanced-tool-use-2025-11-20"
 )
 
 // Helper functions for creating edit configurations

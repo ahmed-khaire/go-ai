@@ -3,8 +3,11 @@ package openai
 import (
 	"context"
 	"fmt"
+	"net/http"
 
+	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
@@ -49,37 +52,39 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
-	// Build request body
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
 	reqBody := map[string]interface{}{
 		"model": m.modelID,
 		"input": input,
 	}
 
-	// Make API request
 	var response openAIEmbeddingResponse
-	err := m.provider.client.PostJSON(ctx, "/embeddings", reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    "/embeddings",
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
 
-	// Validate response
 	if len(response.Data) == 0 {
 		return nil, fmt.Errorf("no embedding data in response")
 	}
 
-	// Convert response to EmbeddingResult
 	return &types.EmbeddingResult{
 		Embedding: response.Data[0].Embedding,
 		Usage: types.EmbeddingUsage{
 			InputTokens: response.Usage.PromptTokens,
 			TotalTokens: response.Usage.TotalTokens,
 		},
+		Response: types.EmbeddingResponse{Headers: map[string][]string(httpResp.Headers)},
 	}, nil
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	if len(inputs) == 0 {
 		return &types.EmbeddingsResult{
 			Embeddings: [][]float64{},
@@ -87,47 +92,55 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 		}, nil
 	}
 
-	// Build request body
 	reqBody := map[string]interface{}{
 		"model": m.modelID,
 		"input": inputs,
 	}
 
-	// Make API request
 	var response openAIEmbeddingResponse
-	err := m.provider.client.PostJSON(ctx, "/embeddings", reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    "/embeddings",
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, m.handleError(err)
 	}
 
-	// Validate response
 	if len(response.Data) != len(inputs) {
 		return nil, fmt.Errorf("expected %d embeddings, got %d", len(inputs), len(response.Data))
 	}
 
-	// Extract embeddings
 	embeddings := make([][]float64, len(response.Data))
 	for i, data := range response.Data {
-		// Verify index matches expected order
 		if data.Index != i {
 			return nil, fmt.Errorf("embedding index mismatch: expected %d, got %d", i, data.Index)
 		}
 		embeddings[i] = data.Embedding
 	}
 
-	// Convert response to EmbeddingsResult
 	return &types.EmbeddingsResult{
 		Embeddings: embeddings,
 		Usage: types.EmbeddingUsage{
 			InputTokens: response.Usage.PromptTokens,
 			TotalTokens: response.Usage.TotalTokens,
 		},
+		Responses: []types.EmbeddingResponse{{Headers: map[string][]string(httpResp.Headers)}},
 	}, nil
 }
 
 // handleError converts various errors to provider errors
 func (m *EmbeddingModel) handleError(err error) error {
 	return providererrors.NewProviderError("openai", 0, "", err.Error(), err)
+}
+
+// optsHeaders extracts the Headers map from EmbedModelOptions (nil-safe).
+func optsHeaders(opts *provider.EmbedModelOptions) map[string]string {
+	if opts == nil {
+		return nil
+	}
+	return opts.Headers
 }
 
 // openAIEmbeddingResponse represents the OpenAI embeddings API response

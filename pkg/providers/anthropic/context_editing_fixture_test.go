@@ -32,7 +32,7 @@ func newFixtureServer(t *testing.T, fixture []byte) (*httptest.Server, *map[stri
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&lastReqBody))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture)
+		_, _ = w.Write(fixture)
 	}))
 	return srv, &lastReqBody
 }
@@ -280,7 +280,7 @@ func TestContextEditing_BetaHeaders_Fixture(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				capturedBeta = r.Header.Get("anthropic-beta")
 				w.Header().Set("Content-Type", "application/json")
-				w.Write(fixture)
+				_, _ = w.Write(fixture)
 			}))
 			defer srv.Close()
 
@@ -310,7 +310,7 @@ func TestContextEditing_RequestBody_Fixture(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedBody))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture)
+		_, _ = w.Write(fixture)
 	}))
 	defer srv.Close()
 

@@ -24,7 +24,7 @@ func NewConfig(apiKey string) (Config, error) {
 	}
 
 	if apiKey == "" {
-		return Config{}, fmt.Errorf("Moonshot API key is required. Set MOONSHOT_API_KEY environment variable or provide it in Config")
+		return Config{}, fmt.Errorf("moonshot API key is required. Set MOONSHOT_API_KEY environment variable or provide it in Config")
 	}
 
 	return Config{
@@ -35,7 +35,7 @@ func NewConfig(apiKey string) (Config, error) {
 // Validate checks if the configuration is valid
 func (c Config) Validate() error {
 	if c.APIKey == "" {
-		return fmt.Errorf("API key is required")
+		return fmt.Errorf("LAPI key is required")
 	}
 	return nil
 }

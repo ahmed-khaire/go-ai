@@ -2,8 +2,11 @@ package together
 
 import (
 	"context"
+	"net/http"
 
+	internalhttp "github.com/digitallysavvy/go-ai/pkg/internal/http"
 	providererrors "github.com/digitallysavvy/go-ai/pkg/provider/errors"
+	"github.com/digitallysavvy/go-ai/pkg/provider"
 	"github.com/digitallysavvy/go-ai/pkg/provider/types"
 )
 
@@ -48,25 +51,34 @@ func (m *EmbeddingModel) SupportsParallelCalls() bool {
 }
 
 // DoEmbed performs embedding for a single input
-func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string) (*types.EmbeddingResult, error) {
-	result, err := m.DoEmbedMany(ctx, []string{input})
+func (m *EmbeddingModel) DoEmbed(ctx context.Context, input string, opts *provider.EmbedModelOptions) (*types.EmbeddingResult, error) {
+	result, err := m.DoEmbedMany(ctx, []string{input}, opts)
 	if err != nil {
 		return nil, err
 	}
-	return &types.EmbeddingResult{
+	r := &types.EmbeddingResult{
 		Embedding: result.Embeddings[0],
 		Usage:     result.Usage,
-	}, nil
+	}
+	if len(result.Responses) > 0 {
+		r.Response = result.Responses[0]
+	}
+	return r, nil
 }
 
 // DoEmbedMany performs embedding for multiple inputs in a batch
-func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*types.EmbeddingsResult, error) {
+func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string, opts *provider.EmbedModelOptions) (*types.EmbeddingsResult, error) {
 	reqBody := map[string]interface{}{
 		"input": inputs,
 		"model": m.modelID,
 	}
 	var response togetherEmbedResponse
-	err := m.provider.client.PostJSON(ctx, "/v1/embeddings", reqBody, &response)
+	httpResp, err := m.provider.client.DoJSONResponse(ctx, internalhttp.Request{
+		Method:  http.MethodPost,
+		Path:    "/v1/embeddings",
+		Body:    reqBody,
+		Headers: optsHeaders(opts),
+	}, &response)
 	if err != nil {
 		return nil, providererrors.NewProviderError("together", 0, "", err.Error(), err)
 	}
@@ -80,7 +92,16 @@ func (m *EmbeddingModel) DoEmbedMany(ctx context.Context, inputs []string) (*typ
 			InputTokens: response.Usage.PromptTokens,
 			TotalTokens: response.Usage.TotalTokens,
 		},
+		Responses: []types.EmbeddingResponse{{Headers: map[string][]string(httpResp.Headers)}},
 	}, nil
+}
+
+// optsHeaders extracts the Headers map from EmbedModelOptions (nil-safe).
+func optsHeaders(opts *provider.EmbedModelOptions) map[string]string {
+	if opts == nil {
+		return nil
+	}
+	return opts.Headers
 }
 
 type togetherEmbedResponse struct {

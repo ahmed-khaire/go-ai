@@ -126,7 +126,7 @@ func TestGetSerializableTools(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck
 
 	// Test GetSerializableTools
 	result, err := client.GetSerializableTools(ctx)
@@ -216,7 +216,7 @@ func TestGetSerializableToolsVsListTools(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck
 
 	// Get serializable tools
 	serializableResult, err := client.GetSerializableTools(ctx)

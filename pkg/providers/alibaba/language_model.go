@@ -94,8 +94,8 @@ func (m *LanguageModel) DoStream(ctx context.Context, opts *provider.GenerateOpt
 	// Check for HTTP errors
 	if httpResp.StatusCode != 200 {
 		body, _ := io.ReadAll(httpResp.Body)
-		httpResp.Body.Close()
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
+		httpResp.Body.Close() //nolint:errcheck
+		return nil, fmt.Errorf("LAPI returned status %d: %s", httpResp.StatusCode, string(body))
 	}
 
 	// Create stream wrapper
@@ -209,10 +209,39 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions, stream 
 		}
 	}
 
+	// Map top-level Reasoning to Alibaba enable_thinking / thinking_budget.
+	// Budgets are scaled from maxOutputTokens=16384 using TS SDK percentages:
+	//   minimal=2% → 1024 (min-clamped), low=10% → 1638, medium=30% → 4915,
+	//   high=60% → 9830, xhigh=90% → 14746 (capped at maxReasoningBudget=16384).
+	// provider-default → omit (do not override Alibaba's own default).
+	// Provider-specific options below may override these values.
+	if opts.Reasoning != nil {
+		switch *opts.Reasoning {
+		case types.ReasoningNone:
+			body["enable_thinking"] = false
+		case types.ReasoningMinimal:
+			body["enable_thinking"] = true
+			body["thinking_budget"] = 1024
+		case types.ReasoningLow:
+			body["enable_thinking"] = true
+			body["thinking_budget"] = 1638
+		case types.ReasoningMedium:
+			body["enable_thinking"] = true
+			body["thinking_budget"] = 4915
+		case types.ReasoningHigh:
+			body["enable_thinking"] = true
+			body["thinking_budget"] = 9830
+		case types.ReasoningXHigh:
+			body["enable_thinking"] = true
+			body["thinking_budget"] = 14746
+		// ReasoningDefault: omit
+		}
+	}
+
 	// Alibaba-specific options from provider metadata
 	if opts.ProviderOptions != nil {
 		if alibabaOpts, ok := opts.ProviderOptions["alibaba"].(map[string]interface{}); ok {
-			// Thinking/reasoning support
+			// Thinking/reasoning support (overrides top-level Reasoning if both set)
 			if enableThinking, ok := alibabaOpts["enable_thinking"].(bool); ok {
 				body["enable_thinking"] = enableThinking
 			}
@@ -253,6 +282,9 @@ func (m *LanguageModel) convertResponse(resp alibabaResponse) *types.GenerateRes
 		FinishReason: providerutils.MapOpenAIFinishReason(choice.FinishReason),
 		Usage:        ConvertAlibabaUsage(resp.Usage),
 		RawResponse:  resp,
+	}
+	if choice.Message.ReasoningContent != "" {
+		result.Content = append(result.Content, types.ReasoningContent{Text: choice.Message.ReasoningContent})
 	}
 
 	// Add tool calls if present

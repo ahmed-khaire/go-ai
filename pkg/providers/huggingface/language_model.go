@@ -66,7 +66,7 @@ func (m *LanguageModel) DoGenerate(ctx context.Context, opts *provider.GenerateO
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Hugging Face API returned status %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("LHugging Face API returned status %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	return m.convertResponse(resp.Body)
@@ -102,11 +102,12 @@ func (m *LanguageModel) buildRequestBody(opts *provider.GenerateOptions) map[str
 				}
 			}
 
-			if msg.Role == "system" {
+			switch msg.Role {
+			case "system":
 				promptText += fmt.Sprintf("System: %s\n", content)
-			} else if msg.Role == "user" {
+			case "user":
 				promptText += fmt.Sprintf("User: %s\n", content)
-			} else if msg.Role == "assistant" {
+			case "assistant":
 				promptText += fmt.Sprintf("Assistant: %s\n", content)
 			}
 		}
@@ -169,7 +170,7 @@ func (m *LanguageModel) convertResponse(body []byte) (*types.GenerateResult, err
 	// Try error format
 	var errorResp hfErrorResponse
 	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error != "" {
-		return nil, fmt.Errorf("Hugging Face API error: %s", errorResp.Error)
+		return nil, fmt.Errorf("LHugging Face API error: %s", errorResp.Error)
 	}
 
 	return nil, fmt.Errorf("unexpected response format from Hugging Face: %s", string(body))

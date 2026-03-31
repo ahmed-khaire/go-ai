@@ -15,6 +15,8 @@ import (
 //	    Total:    pointer(30 * time.Second),  // Total operation timeout
 //	    PerStep:  pointer(10 * time.Second),  // Each generation step
 //	    PerChunk: pointer(5 * time.Second),   // Each streaming chunk
+//	    ToolMs:   pointer(10 * time.Second),  // Default timeout for all tools
+//	    Tools:    map[string]time.Duration{"slowTool": 30 * time.Second},
 //	}
 type TimeoutConfig struct {
 	// Total is the overall timeout for the entire operation
@@ -30,6 +32,16 @@ type TimeoutConfig struct {
 	// If no chunk is received within this duration, the stream is aborted
 	// This helps detect stalled streams and network issues
 	PerChunk *time.Duration
+
+	// ToolMs is the default timeout for all tool executions.
+	// If a tool execution exceeds this duration, it is cancelled.
+	// Per-tool overrides in Tools take precedence over this value.
+	ToolMs *time.Duration //nolint:revive,staticcheck // name matches TS SDK field "toolMs" for parity
+
+	// Tools provides per-tool timeout overrides, keyed by the tool name
+	// (e.g. "searchWeb", not "searchWebMs"). When a tool name is found here,
+	// this duration is used instead of ToolMs.
+	Tools map[string]time.Duration
 }
 
 // CreateTimeoutContext creates a context with the appropriate timeout
@@ -104,4 +116,17 @@ func (tc *TimeoutConfig) WithPerStep(duration time.Duration) *TimeoutConfig {
 func (tc *TimeoutConfig) WithPerChunk(duration time.Duration) *TimeoutConfig {
 	tc.PerChunk = &duration
 	return tc
+}
+
+// GetToolTimeout returns the effective timeout for the named tool.
+// Per-tool entries in Tools take precedence over ToolMs.
+// Returns nil if no timeout applies (tc is nil, ToolMs is nil, and no per-tool entry).
+func (tc *TimeoutConfig) GetToolTimeout(toolName string) *time.Duration {
+	if tc == nil {
+		return nil
+	}
+	if d, ok := tc.Tools[toolName]; ok {
+		return &d
+	}
+	return tc.ToolMs
 }
