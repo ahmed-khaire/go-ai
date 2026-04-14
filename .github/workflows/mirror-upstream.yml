@@ -4,6 +4,25 @@ name: Mirror Upstream
 # Fails loudly if upstream history has diverged (force-push, rewrite) so a human
 # can triage before we silently accept the change. See:
 # https://github.com/multica-ai/multica/blob/main/aicolab/docs/engineering/go-ai-fork-policy.md
+#
+# TOPOLOGY REQUIREMENT (read before editing):
+#   - This workflow MUST live on the `multica-infra` branch (the repo default).
+#   - `main` MUST be an exact byte-for-byte mirror of upstream/main; the workflow
+#     file itself MUST NOT exist on `main`, or the ancestor check below will
+#     (correctly) flag `origin/main` as divergent on every run.
+#   - Scheduled triggers run against the default branch, which is why the
+#     workflow lives on `multica-infra`, not `main`.
+#
+# TAGS ARE NOT MIRRORED:
+#   Upstream tags sometimes reference commits that touch `.github/workflows/*.yml`.
+#   GITHUB_TOKEN (a GitHub App token) is unconditionally forbidden from pushing
+#   refs that modify workflow files — no permission setting changes that. Using
+#   a PAT with the `workflow` scope would work, but we avoid long-lived
+#   credentials. We don't actually need upstream tags on the fork: our `replace`
+#   directive uses our own `vX.Y.Z-multica.N` tags, and Go module consumers pull
+#   from the upstream module proxy by version, not from our fork's tags.
+#   If you ever need a specific upstream tag on the fork, push it manually with
+#   user credentials: `git push origin vX.Y.Z`.
 
 on:
   schedule:
@@ -30,31 +49,37 @@ jobs:
           persist-credentials: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Add upstream remote
+      - name: Add upstream remote and fetch
         run: |
           git remote add upstream https://github.com/digitallysavvy/go-ai.git
-          git fetch upstream main --tags
+          # Fetch commits only — no tags. See TAGS ARE NOT MIRRORED note above.
+          git fetch --no-tags upstream main
 
       - name: Verify fast-forward is possible
         id: verify
         run: |
-          if git merge-base --is-ancestor origin/main upstream/main; then
+          if [ "$(git rev-parse origin/main)" = "$(git rev-parse upstream/main)" ]; then
+            echo "fast_forward_ok=noop" >> "$GITHUB_OUTPUT"
+            echo "Already in sync — nothing to do."
+          elif git merge-base --is-ancestor origin/main upstream/main; then
             echo "fast_forward_ok=true" >> "$GITHUB_OUTPUT"
             echo "Fast-forward safe: origin/main is an ancestor of upstream/main."
           else
             echo "fast_forward_ok=false" >> "$GITHUB_OUTPUT"
-            echo "::error::origin/main is NOT an ancestor of upstream/main — upstream history diverged (force-push or rewrite). Triage manually per fork policy."
+            echo "::error::origin/main is NOT an ancestor of upstream/main — upstream history diverged (force-push or rewrite), OR a fork-local commit landed on main by mistake. Triage manually per fork policy."
             echo "origin/main HEAD: $(git rev-parse origin/main)"
             echo "upstream/main HEAD: $(git rev-parse upstream/main)"
             exit 1
           fi
 
-      - name: Fast-forward main and push tags
+      - name: Fast-forward main
+        id: ff
         if: steps.verify.outputs.fast_forward_ok == 'true'
         run: |
           git merge --ff-only upstream/main
           git push origin main
-          git push origin --tags
+          echo "main_head=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+          echo "Fast-forwarded origin/main to $(git rev-parse --short origin/main)."
 
       - name: Summary
         if: always()
@@ -62,7 +87,8 @@ jobs:
           {
             echo "## Mirror Upstream"
             echo ""
-            echo "- origin/main HEAD: \`$(git rev-parse origin/main)\`"
+            echo "- origin/main HEAD: \`$(git rev-parse origin/main 2>/dev/null || echo 'unavailable')\`"
             echo "- upstream/main HEAD: \`$(git rev-parse upstream/main 2>/dev/null || echo 'unavailable')\`"
-            echo "- fast-forward ok: \`${{ steps.verify.outputs.fast_forward_ok }}\`"
+            echo "- verification: \`${{ steps.verify.outputs.fast_forward_ok }}\`"
+            echo "- fast-forward step: \`${{ steps.ff.outcome }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
