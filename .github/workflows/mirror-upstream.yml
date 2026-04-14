@@ -1,0 +1,68 @@
+name: Mirror Upstream
+
+# Fast-forwards `main` from upstream `digitallysavvy/go-ai` on a weekly schedule.
+# Fails loudly if upstream history has diverged (force-push, rewrite) so a human
+# can triage before we silently accept the change. See:
+# https://github.com/multica-ai/multica/blob/main/aicolab/docs/engineering/go-ai-fork-policy.md
+
+on:
+  schedule:
+    # Every Monday 03:00 UTC. Staggered off weekend so if it fails, someone notices on Monday.
+    - cron: "0 3 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: mirror-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  fast-forward:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/digitallysavvy/go-ai.git
+          git fetch upstream main --tags
+
+      - name: Verify fast-forward is possible
+        id: verify
+        run: |
+          if git merge-base --is-ancestor origin/main upstream/main; then
+            echo "fast_forward_ok=true" >> "$GITHUB_OUTPUT"
+            echo "Fast-forward safe: origin/main is an ancestor of upstream/main."
+          else
+            echo "fast_forward_ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::origin/main is NOT an ancestor of upstream/main — upstream history diverged (force-push or rewrite). Triage manually per fork policy."
+            echo "origin/main HEAD: $(git rev-parse origin/main)"
+            echo "upstream/main HEAD: $(git rev-parse upstream/main)"
+            exit 1
+          fi
+
+      - name: Fast-forward main and push tags
+        if: steps.verify.outputs.fast_forward_ok == 'true'
+        run: |
+          git merge --ff-only upstream/main
+          git push origin main
+          git push origin --tags
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Mirror Upstream"
+            echo ""
+            echo "- origin/main HEAD: \`$(git rev-parse origin/main)\`"
+            echo "- upstream/main HEAD: \`$(git rev-parse upstream/main 2>/dev/null || echo 'unavailable')\`"
+            echo "- fast-forward ok: \`${{ steps.verify.outputs.fast_forward_ok }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
